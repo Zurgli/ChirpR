@@ -1,8 +1,8 @@
 # Chirp Rust
 
-Chirp Rust is the Windows-native Rust port of the original Chirp local dictation app in `.context/chirp-stt`.
+Chirp Rust is the Windows-native Rust port of the original Chirp dictation app.
 
-The original Python implementation came from the upstream `Whamp/chirp` project, which is vendored here under `.context/chirp-stt` as the migration reference. This repository is the Rust-based implementation of that app's behavior and workflow.
+The original Python implementation came from the upstream `Whamp/chirp` project. This repository is the Rust-based implementation of that app's behavior and workflow.
 
 ## Current status
 
