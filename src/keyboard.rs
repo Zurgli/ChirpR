@@ -1,7 +1,8 @@
 use std::collections::HashSet;
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
@@ -82,6 +83,16 @@ impl KeyboardShortcutListener {
         self.trigger_rx
             .recv()
             .context("keyboard listener disconnected")
+    }
+
+    pub fn recv_timeout(&self, duration: Duration) -> Result<Option<()>> {
+        match self.trigger_rx.recv_timeout(duration) {
+            Ok(()) => Ok(Some(())),
+            Err(RecvTimeoutError::Timeout) => Ok(None),
+            Err(RecvTimeoutError::Disconnected) => {
+                anyhow::bail!("keyboard listener disconnected")
+            }
+        }
     }
 }
 

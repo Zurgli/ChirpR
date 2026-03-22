@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
@@ -15,6 +16,7 @@ use crate::text_processing::TextProcessor;
 
 struct AppState {
     active_recording: Option<ActiveRecording>,
+    recording_started_at: Option<Instant>,
 }
 
 pub struct ChirpApp {
@@ -56,6 +58,7 @@ impl ChirpApp {
             parakeet,
             state: Mutex::new(AppState {
                 active_recording: None,
+                recording_started_at: None,
             }),
         })
     }
@@ -67,8 +70,15 @@ impl ChirpApp {
         );
 
         loop {
-            self.shortcut_listener.recv()?;
-            self.toggle_recording()?;
+            if let Some(timeout) = self.recording_timeout_remaining()? {
+                match self.shortcut_listener.recv_timeout(timeout)? {
+                    Some(()) => self.toggle_recording()?,
+                    None => self.handle_timeout()?,
+                }
+            } else {
+                self.shortcut_listener.recv()?;
+                self.toggle_recording()?;
+            }
         }
     }
 
@@ -82,6 +92,7 @@ impl ChirpApp {
             match MicrophoneRecorder::start_default() {
                 Ok(recording) => {
                     state.active_recording = Some(recording);
+                    state.recording_started_at = Some(Instant::now());
                     drop(state);
                     self.audio_feedback
                         .play_start(self.config.start_sound_path.as_deref());
@@ -99,6 +110,7 @@ impl ChirpApp {
             }
         } else {
             let recording = state.active_recording.take().expect("recording present");
+            state.recording_started_at = None;
             drop(state);
             if let Ok(overlay) = self.overlay.lock() {
                 overlay.hide();
@@ -118,6 +130,7 @@ impl ChirpApp {
         let overlay = Arc::clone(&self.overlay);
         let keyboard = Arc::clone(&self.keyboard);
         let parakeet = Arc::clone(&self.parakeet);
+        let audio_feedback = self.audio_feedback.clone();
 
         thread::spawn(move || {
             let processor =
@@ -135,6 +148,7 @@ impl ChirpApp {
                 Ok(value) => value,
                 Err(error) => {
                     eprintln!("error: failed to stop recording: {error:#}");
+                    audio_feedback.play_error(config.error_sound_path.as_deref());
                     return;
                 }
             };
@@ -154,11 +168,13 @@ impl ChirpApp {
                     if !text.trim().is_empty() {
                         if let Err(error) = injector.inject(&text) {
                             eprintln!("error: text injection failed: {error:#}");
+                            audio_feedback.play_error(config.error_sound_path.as_deref());
                         }
                     }
                 }
                 Err(error) => {
                     eprintln!("error: transcription failed: {error:#}");
+                    audio_feedback.play_error(config.error_sound_path.as_deref());
                 }
             }
 
@@ -166,6 +182,28 @@ impl ChirpApp {
                 overlay.hide();
             }
         });
+    }
+
+    fn recording_timeout_remaining(&self) -> Result<Option<Duration>> {
+        if self.config.max_recording_duration <= 0.0 {
+            return Ok(None);
+        }
+
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("app state lock poisoned"))?;
+        let Some(started_at) = state.recording_started_at else {
+            return Ok(None);
+        };
+
+        let limit = Duration::from_secs_f32(self.config.max_recording_duration);
+        Ok(Some(limit.saturating_sub(started_at.elapsed())))
+    }
+
+    fn handle_timeout(&self) -> Result<()> {
+        println!("Maximum recording duration reached.");
+        self.toggle_recording()
     }
 }
 
