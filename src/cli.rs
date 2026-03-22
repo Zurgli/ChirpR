@@ -23,4 +23,8 @@ pub struct Cli {
 pub enum Command {
     Setup,
     Check,
+    Transcribe {
+        #[arg(long)]
+        wav: PathBuf,
+    },
 }

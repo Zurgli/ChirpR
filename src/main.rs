@@ -1,4 +1,5 @@
 use anyhow::Result;
+use chirp_rust::audio::AudioBuffer;
 use chirp_rust::cli::{Cli, Command};
 use chirp_rust::config::{ChirpConfig, ProjectPaths};
 use chirp_rust::stt::parakeet::ParakeetModelSpec;
@@ -114,6 +115,40 @@ fn run() -> Result<()> {
             if cli.verbose {
                 println!("config: {config:#?}");
             }
+        }
+        Command::Transcribe { wav } => {
+            let config = ChirpConfig::load(&paths)?;
+            let model_dir = paths.model_dir(
+                &config.parakeet_model,
+                config.parakeet_quantization.as_deref(),
+            )?;
+            let spec = ParakeetModelSpec::resolve(
+                &config.parakeet_model,
+                config.parakeet_quantization.as_deref(),
+            )?;
+            let audio = AudioBuffer::load_wav(&wav)?;
+            audio.require_sample_rate(16_000)?;
+
+            let mut manager = spec.create_manager(&model_dir)?;
+            let decode = manager.greedy_decode_waveform(&audio.mono_samples, 10)?;
+            let processor =
+                TextProcessor::new(config.word_overrides.clone(), &config.post_processing);
+            let processed = processor.process(&decode.text);
+
+            if cli.verbose {
+                println!(
+                    "audio: sample_rate_hz={} channels={} mono_samples={}",
+                    audio.sample_rate_hz,
+                    audio.channels,
+                    audio.mono_samples.len(),
+                );
+                println!(
+                    "decode: token_ids={:?} timestamps={:?}",
+                    decode.token_ids, decode.timestamps
+                );
+            }
+
+            println!("{processed}");
         }
     }
 

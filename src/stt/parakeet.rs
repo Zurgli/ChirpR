@@ -295,7 +295,7 @@ impl ParakeetManager {
     }
 
     pub fn run_frontend_dummy(&mut self, sample_count: usize) -> Result<FrontendPassSummary> {
-        let frontend = self.run_frontend_outputs(sample_count)?;
+        let frontend = self.run_frontend_outputs_for_samples(&vec![0.0; sample_count])?;
         Ok(FrontendPassSummary {
             waveform_shape: frontend.waveform.shape().to_vec(),
             feature_shape: frontend.features.shape().to_vec(),
@@ -306,7 +306,7 @@ impl ParakeetManager {
     }
 
     pub fn run_decoder_dummy_step(&mut self, sample_count: usize) -> Result<DecoderStepSummary> {
-        let frontend = self.run_frontend_outputs(sample_count)?;
+        let frontend = self.run_frontend_outputs_for_samples(&vec![0.0; sample_count])?;
         let bundle = self.load_bundle()?;
         let bootstrap = bundle.vocabulary.build_decoder_bootstrap(1)?;
         let sessions = self
@@ -348,7 +348,15 @@ impl ParakeetManager {
         sample_count: usize,
         max_tokens_per_step: usize,
     ) -> Result<GreedyDecodeResult> {
-        let frontend = self.run_frontend_outputs(sample_count)?;
+        self.greedy_decode_waveform(&vec![0.0; sample_count], max_tokens_per_step)
+    }
+
+    pub fn greedy_decode_waveform(
+        &mut self,
+        waveform_samples: &[f32],
+        max_tokens_per_step: usize,
+    ) -> Result<GreedyDecodeResult> {
+        let frontend = self.run_frontend_outputs_for_samples(waveform_samples)?;
         let bundle = self.load_bundle()?;
         let blank_idx = bundle
             .vocabulary
@@ -431,15 +439,20 @@ impl ParakeetManager {
         })
     }
 
-    fn run_frontend_outputs(&mut self, sample_count: usize) -> Result<FrontendOutputs> {
+    fn run_frontend_outputs_for_samples(
+        &mut self,
+        waveform_samples: &[f32],
+    ) -> Result<FrontendOutputs> {
         self.ensure_loaded()?;
         let sessions = self
             .sessions
             .as_mut()
             .context("Parakeet sessions were not loaded")?;
 
-        let waveform = Array2::<f32>::zeros((1, sample_count));
-        let waveform_lens = Array1::<i64>::from_vec(vec![sample_count as i64]);
+        let waveform =
+            Array2::<f32>::from_shape_vec((1, waveform_samples.len()), waveform_samples.to_vec())
+                .context("failed to shape waveform input tensor")?;
+        let waveform_lens = Array1::<i64>::from_vec(vec![waveform_samples.len() as i64]);
 
         let feature_outputs = sessions._feature_session.run(ort::inputs![
             TensorRef::from_array_view(&waveform)?,
