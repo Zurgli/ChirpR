@@ -81,6 +81,30 @@ impl AudioBuffer {
             mono_samples: resampled,
         })
     }
+
+    pub fn write_wav(&self, path: &Path) -> Result<()> {
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: self.sample_rate_hz,
+            bits_per_sample: 16,
+            sample_format: SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(path, spec)
+            .with_context(|| format!("failed to create wav file {}", path.display()))?;
+
+        for sample in &self.mono_samples {
+            let clamped = sample.clamp(-1.0, 1.0);
+            let pcm = (clamped * i16::MAX as f32).round() as i16;
+            writer
+                .write_sample(pcm)
+                .with_context(|| format!("failed to write wav sample to {}", path.display()))?;
+        }
+
+        writer
+            .finalize()
+            .with_context(|| format!("failed to finalize wav file {}", path.display()))?;
+        Ok(())
+    }
 }
 
 fn read_i8_samples(reader: &mut WavReader<std::io::BufReader<std::fs::File>>) -> Result<Vec<f32>> {
@@ -194,6 +218,24 @@ mod tests {
 
         let error = audio.resample_to(0).unwrap_err().to_string();
         assert!(error.contains("target sample rate must be greater than zero"));
+    }
+
+    #[test]
+    fn writes_and_reloads_wav() {
+        let path = temp_wav_path("roundtrip");
+        let original = AudioBuffer {
+            sample_rate_hz: 16_000,
+            channels: 1,
+            mono_samples: vec![0.0, 0.5, -0.5],
+        };
+
+        original.write_wav(&path).unwrap();
+        let roundtrip = AudioBuffer::load_wav(&path).unwrap();
+        assert_eq!(roundtrip.sample_rate_hz, 16_000);
+        assert_eq!(roundtrip.channels, 1);
+        assert_eq!(roundtrip.mono_samples.len(), 3);
+
+        let _ = fs::remove_file(path);
     }
 
     fn temp_wav_path(label: &str) -> std::path::PathBuf {

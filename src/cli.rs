@@ -23,6 +23,13 @@ pub struct Cli {
 pub enum Command {
     Setup,
     Check,
+    Record {
+        #[arg(long)]
+        seconds: Option<f32>,
+
+        #[arg(long)]
+        wav: Option<PathBuf>,
+    },
     Transcribe {
         #[arg(long)]
         wav: PathBuf,
