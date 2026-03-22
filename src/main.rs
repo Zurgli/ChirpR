@@ -53,6 +53,8 @@ fn run() -> Result<()> {
             println!("model dir: {}", model_dir.display());
             if missing_files.is_empty() {
                 println!("model files: ready");
+                spec.create_manager(&model_dir)?;
+                println!("onnx sessions: ready");
             } else {
                 println!("model files missing: {}", missing_files.join(", "));
             }
