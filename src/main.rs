@@ -315,7 +315,7 @@ fn transcribe_buffer(
     }
 
     let processor = TextProcessor::new(config.word_overrides.clone(), &config.post_processing);
-    let decoded = transcribe_capture(paths, config, &audio, capture_summary)?;
+    let decoded = transcribe_capture(paths, config, &audio, capture_summary, None)?;
     let processed = processor.process(&decoded);
 
     if verbose {

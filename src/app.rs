@@ -9,7 +9,7 @@ use crate::config::{ChirpConfig, ProjectPaths};
 use crate::keyboard::{KeyboardController, KeyboardShortcutListener};
 use crate::recording::{ActiveRecording, CaptureSummary, MicrophoneRecorder};
 use crate::recording_overlay::RecordingOverlay;
-use crate::stt::parakeet::ParakeetModelSpec;
+use crate::stt::parakeet::{ParakeetManager, ParakeetModelSpec};
 use crate::text_injection::TextInjector;
 use crate::text_processing::TextProcessor;
 
@@ -24,14 +24,24 @@ pub struct ChirpApp {
     shortcut_listener: KeyboardShortcutListener,
     overlay: Arc<Mutex<RecordingOverlay>>,
     audio_feedback: AudioFeedback,
+    parakeet: Arc<Mutex<ParakeetManager>>,
     state: Mutex<AppState>,
 }
 
 impl ChirpApp {
     pub fn new(paths: ProjectPaths) -> Result<Self> {
         let config = ChirpConfig::load(&paths)?;
+        let model_dir = paths.model_dir(
+            &config.parakeet_model,
+            config.parakeet_quantization.as_deref(),
+        )?;
+        let spec = ParakeetModelSpec::resolve(
+            &config.parakeet_model,
+            config.parakeet_quantization.as_deref(),
+        )?;
         let keyboard = Arc::new(KeyboardController::new()?);
         let shortcut_listener = KeyboardShortcutListener::register(&config.primary_shortcut)?;
+        let parakeet = Arc::new(Mutex::new(spec.create_manager(&model_dir)?));
         Ok(Self {
             audio_feedback: AudioFeedback::new(
                 config.audio_feedback,
@@ -43,6 +53,7 @@ impl ChirpApp {
             paths,
             keyboard,
             shortcut_listener,
+            parakeet,
             state: Mutex::new(AppState {
                 active_recording: None,
             }),
@@ -74,7 +85,7 @@ impl ChirpApp {
                     drop(state);
                     self.audio_feedback
                         .play_start(self.config.start_sound_path.as_deref());
-                    if let Ok(mut overlay) = self.overlay.lock() {
+                    if let Ok(overlay) = self.overlay.lock() {
                         overlay.show("transcribing");
                     }
                     println!("Recording started");
@@ -106,6 +117,7 @@ impl ChirpApp {
         let paths = self.paths.clone();
         let overlay = Arc::clone(&self.overlay);
         let keyboard = Arc::clone(&self.keyboard);
+        let parakeet = Arc::clone(&self.parakeet);
 
         thread::spawn(move || {
             let processor =
@@ -127,11 +139,17 @@ impl ChirpApp {
                 }
             };
 
-            if let Ok(mut overlay) = overlay.lock() {
+            if let Ok(overlay) = overlay.lock() {
                 overlay.show("loading");
             }
 
-            match transcribe_capture(&paths, &config, &recording.audio, Some(&recording.summary)) {
+            match transcribe_capture(
+                &paths,
+                &config,
+                &recording.audio,
+                Some(&recording.summary),
+                Some(&parakeet),
+            ) {
                 Ok(text) => {
                     if !text.trim().is_empty() {
                         if let Err(error) = injector.inject(&text) {
@@ -156,21 +174,30 @@ pub fn transcribe_capture(
     config: &ChirpConfig,
     source_audio: &AudioBuffer,
     _summary: Option<&CaptureSummary>,
+    manager: Option<&Arc<Mutex<ParakeetManager>>>,
 ) -> Result<String> {
     if source_audio.mono_samples.is_empty() {
         return Ok(String::new());
     }
 
-    let model_dir = paths.model_dir(
-        &config.parakeet_model,
-        config.parakeet_quantization.as_deref(),
-    )?;
-    let spec = ParakeetModelSpec::resolve(
-        &config.parakeet_model,
-        config.parakeet_quantization.as_deref(),
-    )?;
     let audio = source_audio.resample_to(16_000)?;
-    let mut manager = spec.create_manager(&model_dir)?;
-    let decode = manager.greedy_decode_waveform(&audio.mono_samples, 10)?;
+    let decode = if let Some(manager) = manager {
+        let mut manager = manager
+            .lock()
+            .map_err(|_| anyhow::anyhow!("parakeet manager lock poisoned"))?;
+        manager.maybe_unload();
+        manager.greedy_decode_waveform(&audio.mono_samples, 10)?
+    } else {
+        let model_dir = paths.model_dir(
+            &config.parakeet_model,
+            config.parakeet_quantization.as_deref(),
+        )?;
+        let spec = ParakeetModelSpec::resolve(
+            &config.parakeet_model,
+            config.parakeet_quantization.as_deref(),
+        )?;
+        let mut manager = spec.create_manager(&model_dir)?;
+        manager.greedy_decode_waveform(&audio.mono_samples, 10)?
+    };
     Ok(decode.text)
 }
