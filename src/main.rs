@@ -53,8 +53,20 @@ fn run() -> Result<()> {
             println!("model dir: {}", model_dir.display());
             if missing_files.is_empty() {
                 println!("model files: ready");
-                spec.create_manager(&model_dir)?;
+                let manager = spec.create_manager(&model_dir)?;
                 println!("onnx sessions: ready");
+                if cli.verbose {
+                    for session in manager.describe() {
+                        println!("{} inputs:", session.label);
+                        for input in session.inputs {
+                            println!("  - {} :: {}", input.name, input.dtype);
+                        }
+                        println!("{} outputs:", session.label);
+                        for output in session.outputs {
+                            println!("  - {} :: {}", output.name, output.dtype);
+                        }
+                    }
+                }
             } else {
                 println!("model files missing: {}", missing_files.join(", "));
             }

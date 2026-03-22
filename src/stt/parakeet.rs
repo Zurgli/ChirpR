@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use ort::session::Session;
+use ort::{session::Session, value::ValueType};
 use reqwest::blocking::Client;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,6 +22,19 @@ pub struct ParakeetManager {
     sessions: Option<ParakeetSessions>,
     timeout: Option<Duration>,
     last_access: Instant,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionIoSummary {
+    pub label: &'static str,
+    pub inputs: Vec<OutletSummary>,
+    pub outputs: Vec<OutletSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutletSummary {
+    pub name: String,
+    pub dtype: String,
 }
 
 #[derive(Debug)]
@@ -189,6 +202,30 @@ impl ParakeetManager {
         }
     }
 
+    pub fn describe(&self) -> Vec<SessionIoSummary> {
+        let Some(sessions) = &self.sessions else {
+            return Vec::new();
+        };
+
+        vec![
+            SessionIoSummary {
+                label: "encoder",
+                inputs: summarize_outlets(sessions._encoder_session.inputs()),
+                outputs: summarize_outlets(sessions._encoder_session.outputs()),
+            },
+            SessionIoSummary {
+                label: "decoder",
+                inputs: summarize_outlets(sessions._decoder_session.inputs()),
+                outputs: summarize_outlets(sessions._decoder_session.outputs()),
+            },
+            SessionIoSummary {
+                label: "nemo128",
+                inputs: summarize_outlets(sessions._feature_session.inputs()),
+                outputs: summarize_outlets(sessions._feature_session.outputs()),
+            },
+        ]
+    }
+
     fn load_sessions(&self) -> Result<ParakeetSessions> {
         let _ = ort::init().commit();
 
@@ -232,6 +269,20 @@ impl ParakeetManager {
             _feature_session: feature_session,
         })
     }
+}
+
+fn summarize_outlets(outlets: &[ort::value::Outlet]) -> Vec<OutletSummary> {
+    outlets
+        .iter()
+        .map(|outlet| OutletSummary {
+            name: outlet.name().to_string(),
+            dtype: format_value_type(outlet.dtype()),
+        })
+        .collect()
+}
+
+fn format_value_type(value_type: &ValueType) -> String {
+    format!("{value_type:?}")
 }
 
 fn download_if_needed(
