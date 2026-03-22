@@ -33,7 +33,11 @@ impl ChirpApp {
         let keyboard = Arc::new(KeyboardController::new()?);
         let shortcut_listener = KeyboardShortcutListener::register(&config.primary_shortcut)?;
         Ok(Self {
-            audio_feedback: AudioFeedback::new(config.audio_feedback, config.audio_feedback_volume),
+            audio_feedback: AudioFeedback::new(
+                config.audio_feedback,
+                config.audio_feedback_volume,
+                paths.assets_root.join("sounds"),
+            ),
             overlay: Arc::new(Mutex::new(RecordingOverlay::new(config.recording_overlay))),
             config,
             paths,
