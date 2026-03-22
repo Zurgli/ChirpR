@@ -56,6 +56,23 @@ fn run() -> Result<()> {
                 let manager = spec.create_manager(&model_dir)?;
                 println!("onnx sessions: ready");
                 if cli.verbose {
+                    let bundle = manager.load_bundle()?;
+                    let bootstrap = bundle.vocabulary.build_decoder_bootstrap(1)?;
+                    println!(
+                        "bundle: model_type={} features_size={} subsampling_factor={} vocab_size={} blank_token_id={}",
+                        bundle.config.model_type,
+                        bundle.config.features_size,
+                        bundle.config.subsampling_factor,
+                        bundle.vocabulary.len(),
+                        bundle.vocabulary.blank_token_id(),
+                    );
+                    println!(
+                        "decoder bootstrap: targets={:?} target_length={:?} state_1_shape={:?} state_2_shape={:?}",
+                        bootstrap.targets.shape(),
+                        bootstrap.target_length.to_vec(),
+                        bootstrap.input_states_1.shape(),
+                        bootstrap.input_states_2.shape(),
+                    );
                     for session in manager.describe() {
                         println!("{} inputs:", session.label);
                         for input in session.inputs {

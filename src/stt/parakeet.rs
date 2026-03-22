@@ -4,8 +4,10 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
+use ndarray::{Array1, Array2, Array3};
 use ort::{session::Session, value::ValueType};
 use reqwest::blocking::Client;
+use serde::Deserialize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParakeetModelSpec {
@@ -35,6 +37,32 @@ pub struct SessionIoSummary {
 pub struct OutletSummary {
     pub name: String,
     pub dtype: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParakeetBundle {
+    pub config: ParakeetConfig,
+    pub vocabulary: ParakeetVocabulary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ParakeetConfig {
+    pub model_type: String,
+    pub features_size: usize,
+    pub subsampling_factor: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParakeetVocabulary {
+    pub tokens: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DecoderBootstrap {
+    pub targets: Array2<i32>,
+    pub target_length: Array1<i32>,
+    pub input_states_1: Array3<f32>,
+    pub input_states_2: Array3<f32>,
 }
 
 #[derive(Debug)]
@@ -202,6 +230,10 @@ impl ParakeetManager {
         }
     }
 
+    pub fn load_bundle(&self) -> Result<ParakeetBundle> {
+        ParakeetBundle::load(&self.model_dir)
+    }
+
     pub fn describe(&self) -> Vec<SessionIoSummary> {
         let Some(sessions) = &self.sessions else {
             return Vec::new();
@@ -267,6 +299,60 @@ impl ParakeetManager {
             _encoder_session: encoder_session,
             _decoder_session: decoder_session,
             _feature_session: feature_session,
+        })
+    }
+}
+
+impl ParakeetBundle {
+    pub fn load(model_dir: &Path) -> Result<Self> {
+        let config_path = model_dir.join("config.json");
+        let config_raw = fs::read_to_string(&config_path)
+            .with_context(|| format!("failed to read {}", config_path.display()))?;
+        let config: ParakeetConfig = serde_json::from_str(&config_raw)
+            .with_context(|| format!("failed to parse {}", config_path.display()))?;
+
+        let vocab_path = model_dir.join("vocab.txt");
+        let vocab_raw = fs::read_to_string(&vocab_path)
+            .with_context(|| format!("failed to read {}", vocab_path.display()))?;
+        let tokens = vocab_raw
+            .lines()
+            .filter_map(|line| line.split_once(' ').map(|(token, _)| token.to_string()))
+            .collect::<Vec<_>>();
+
+        Ok(Self {
+            config,
+            vocabulary: ParakeetVocabulary { tokens },
+        })
+    }
+}
+
+impl ParakeetVocabulary {
+    pub fn len(&self) -> usize {
+        self.tokens.len()
+    }
+
+    pub fn token_id(&self, token: &str) -> Option<usize> {
+        self.tokens.iter().position(|value| value == token)
+    }
+
+    pub fn start_of_transcript_id(&self) -> Option<usize> {
+        self.token_id("<|startoftranscript|>")
+    }
+
+    pub fn blank_token_id(&self) -> usize {
+        self.tokens.len()
+    }
+
+    pub fn build_decoder_bootstrap(&self, batch_size: usize) -> Result<DecoderBootstrap> {
+        let start_token =
+            self.start_of_transcript_id()
+                .context("missing <|startoftranscript|> token in vocabulary")? as i32;
+
+        Ok(DecoderBootstrap {
+            targets: Array2::from_elem((batch_size, 1), start_token),
+            target_length: Array1::from_elem(batch_size, 1_i32),
+            input_states_1: Array3::zeros((2, batch_size, 640)),
+            input_states_2: Array3::zeros((2, batch_size, 640)),
         })
     }
 }
@@ -399,5 +485,24 @@ mod tests {
         thread::sleep(Duration::from_millis(5));
         manager.maybe_unload();
         assert!(!manager.is_loaded());
+    }
+
+    #[test]
+    fn vocabulary_builds_decoder_bootstrap() {
+        let vocabulary = ParakeetVocabulary {
+            tokens: vec![
+                "<unk>".into(),
+                "<|startoftranscript|>".into(),
+                "hello".into(),
+            ],
+        };
+
+        let bootstrap = vocabulary.build_decoder_bootstrap(2).unwrap();
+        assert_eq!(bootstrap.targets.shape(), &[2, 1]);
+        assert_eq!(bootstrap.target_length.to_vec(), vec![1, 1]);
+        assert_eq!(bootstrap.targets[[0, 0]], 1);
+        assert_eq!(bootstrap.input_states_1.shape(), &[2, 2, 640]);
+        assert_eq!(bootstrap.input_states_2.shape(), &[2, 2, 640]);
+        assert_eq!(vocabulary.blank_token_id(), 3);
     }
 }
