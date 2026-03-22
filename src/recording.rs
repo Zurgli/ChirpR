@@ -22,14 +22,19 @@ pub struct RecordingResult {
     pub summary: CaptureSummary,
 }
 
+pub struct ActiveRecording {
+    stream: cpal::Stream,
+    captured: Arc<Mutex<Vec<f32>>>,
+    error_slot: Arc<Mutex<Option<String>>>,
+    device_name: String,
+    sample_rate_hz: u32,
+    channels: u16,
+}
+
 pub struct MicrophoneRecorder;
 
 impl MicrophoneRecorder {
-    pub fn record_for(duration: Duration) -> Result<RecordingResult> {
-        if duration.is_zero() {
-            bail!("recording duration must be greater than zero");
-        }
-
+    pub fn start_default() -> Result<ActiveRecording> {
         let host = cpal::default_host();
         let device = host
             .default_input_device()
@@ -45,40 +50,61 @@ impl MicrophoneRecorder {
         let channels = stream_config.channels;
 
         let captured = Arc::new(Mutex::new(Vec::<f32>::new()));
-        let callback_capture = Arc::clone(&captured);
         let error_slot = Arc::new(Mutex::new(None::<String>));
-        let callback_error = Arc::clone(&error_slot);
-
         let stream = match supported_config.sample_format() {
             cpal::SampleFormat::F32 => build_input_stream::<f32>(
                 &device,
                 &stream_config,
                 channels,
-                callback_capture,
-                callback_error,
+                Arc::clone(&captured),
+                Arc::clone(&error_slot),
             )?,
             cpal::SampleFormat::I16 => build_input_stream::<i16>(
                 &device,
                 &stream_config,
                 channels,
-                callback_capture,
-                callback_error,
+                Arc::clone(&captured),
+                Arc::clone(&error_slot),
             )?,
             cpal::SampleFormat::U16 => build_input_stream::<u16>(
                 &device,
                 &stream_config,
                 channels,
-                callback_capture,
-                callback_error,
+                Arc::clone(&captured),
+                Arc::clone(&error_slot),
             )?,
             sample_format => bail!("unsupported input sample format: {sample_format:?}"),
         };
 
         stream.play().context("failed to start input stream")?;
-        thread::sleep(duration);
-        drop(stream);
 
-        if let Some(message) = error_slot
+        Ok(ActiveRecording {
+            stream,
+            captured,
+            error_slot,
+            device_name,
+            sample_rate_hz,
+            channels,
+        })
+    }
+
+    pub fn record_for(duration: Duration) -> Result<RecordingResult> {
+        if duration.is_zero() {
+            bail!("recording duration must be greater than zero");
+        }
+
+        let active = Self::start_default()?;
+        thread::sleep(duration);
+        active.stop()
+    }
+}
+
+impl ActiveRecording {
+    pub fn stop(self) -> Result<RecordingResult> {
+        drop(self.stream);
+
+        if let Some(message) = self
+            .error_slot
             .lock()
             .map_err(|_| anyhow::anyhow!("audio error state was poisoned"))?
             .take()
@@ -86,20 +112,21 @@ impl MicrophoneRecorder {
             bail!("audio capture failed: {message}");
         }
 
-        let mono_samples = captured
+        let mono_samples = self
+            .captured
             .lock()
             .map_err(|_| anyhow::anyhow!("audio buffer was poisoned"))?
             .clone();
 
         Ok(RecordingResult {
             summary: CaptureSummary {
-                device_name,
-                sample_rate_hz,
-                channels,
+                device_name: self.device_name,
+                sample_rate_hz: self.sample_rate_hz,
+                channels: self.channels,
                 captured_samples: mono_samples.len(),
             },
             audio: AudioBuffer {
-                sample_rate_hz,
+                sample_rate_hz: self.sample_rate_hz,
                 channels: 1,
                 mono_samples,
             },

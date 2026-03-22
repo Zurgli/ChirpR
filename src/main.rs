@@ -2,11 +2,15 @@ use anyhow::Result;
 use chirp_rust::audio::AudioBuffer;
 use chirp_rust::cli::{Cli, Command};
 use chirp_rust::config::{ChirpConfig, ProjectPaths};
-use chirp_rust::recording::MicrophoneRecorder;
+use chirp_rust::recording::{ActiveRecording, MicrophoneRecorder};
 use chirp_rust::stt::parakeet::ParakeetModelSpec;
 use chirp_rust::text_processing::TextProcessor;
 use clap::Parser;
+use std::io::{self, BufRead};
+use std::sync::mpsc;
+use std::thread;
 use std::time::Duration;
+use std::time::Instant;
 
 fn main() {
     if let Err(error) = run() {
@@ -18,11 +22,11 @@ fn main() {
 fn run() -> Result<()> {
     let cli = Cli::parse();
     let mut paths = ProjectPaths::discover()?;
-    if let Some(config_path) = cli.config {
-        paths = paths.with_config_path(config_path);
+    if let Some(config_path) = cli.config.as_ref() {
+        paths = paths.with_config_path(config_path.clone());
     }
 
-    match cli.command.unwrap_or(Command::Check) {
+    match cli.command.clone().unwrap_or(Command::Check) {
         Command::Setup => {
             let config = ChirpConfig::load(&paths)?;
             paths.ensure_models_root()?;
@@ -118,89 +122,234 @@ fn run() -> Result<()> {
                 println!("config: {config:#?}");
             }
         }
+        Command::Listen => {
+            run_terminal_session(&cli, &paths)?;
+        }
         Command::Record { seconds, wav } => {
             let config = ChirpConfig::load(&paths)?;
             let duration = resolve_recording_duration(seconds, config.max_recording_duration)?;
             let recording = MicrophoneRecorder::record_for(duration)?;
-            let runtime_audio = recording.audio.resample_to(16_000)?;
-
-            if let Some(output) = wav.as_ref() {
-                runtime_audio.write_wav(output)?;
-            }
-
-            let model_dir = paths.model_dir(
-                &config.parakeet_model,
-                config.parakeet_quantization.as_deref(),
+            let processed = transcribe_buffer(
+                &paths,
+                &config,
+                &recording.audio,
+                wav.as_deref(),
+                cli.verbose,
+                Some(&recording.summary),
             )?;
-            let spec = ParakeetModelSpec::resolve(
-                &config.parakeet_model,
-                config.parakeet_quantization.as_deref(),
-            )?;
-            let mut manager = spec.create_manager(&model_dir)?;
-            let decode = manager.greedy_decode_waveform(&runtime_audio.mono_samples, 10)?;
-            let processor =
-                TextProcessor::new(config.word_overrides.clone(), &config.post_processing);
-            let processed = processor.process(&decode.text);
 
             if cli.verbose {
-                println!(
-                    "capture: device={:?} duration_secs={:.2} source_rate_hz={} source_channels={} captured_samples={} runtime_samples={}",
-                    recording.summary.device_name,
-                    duration.as_secs_f32(),
-                    recording.summary.sample_rate_hz,
-                    recording.summary.channels,
-                    recording.summary.captured_samples,
-                    runtime_audio.mono_samples.len(),
-                );
-                println!(
-                    "decode: token_ids={:?} timestamps={:?}",
-                    decode.token_ids, decode.timestamps
-                );
-                if let Some(output) = wav {
-                    println!("saved wav: {}", output.display());
-                }
+                println!("record duration_secs={:.2}", duration.as_secs_f32());
             }
 
             println!("{processed}");
         }
         Command::Transcribe { wav } => {
             let config = ChirpConfig::load(&paths)?;
-            let model_dir = paths.model_dir(
-                &config.parakeet_model,
-                config.parakeet_quantization.as_deref(),
-            )?;
-            let spec = ParakeetModelSpec::resolve(
-                &config.parakeet_model,
-                config.parakeet_quantization.as_deref(),
-            )?;
             let source_audio = AudioBuffer::load_wav(&wav)?;
-            let audio = source_audio.resample_to(16_000)?;
-
-            let mut manager = spec.create_manager(&model_dir)?;
-            let decode = manager.greedy_decode_waveform(&audio.mono_samples, 10)?;
-            let processor =
-                TextProcessor::new(config.word_overrides.clone(), &config.post_processing);
-            let processed = processor.process(&decode.text);
-
-            if cli.verbose {
-                println!(
-                    "audio: source_rate_hz={} runtime_rate_hz={} channels={} mono_samples={}",
-                    source_audio.sample_rate_hz,
-                    audio.sample_rate_hz,
-                    source_audio.channels,
-                    audio.mono_samples.len(),
-                );
-                println!(
-                    "decode: token_ids={:?} timestamps={:?}",
-                    decode.token_ids, decode.timestamps
-                );
-            }
+            let processed =
+                transcribe_buffer(&paths, &config, &source_audio, None, cli.verbose, None)?;
 
             println!("{processed}");
         }
     }
 
     Ok(())
+}
+
+fn run_terminal_session(cli: &Cli, paths: &ProjectPaths) -> Result<()> {
+    let config = ChirpConfig::load(paths)?;
+    let timeout = if config.max_recording_duration > 0.0 {
+        Some(Duration::from_secs_f32(config.max_recording_duration))
+    } else {
+        None
+    };
+
+    println!("Press Enter to start/stop recording. Type q then Enter to quit.");
+
+    let (tx, rx) = mpsc::channel::<String>();
+    thread::spawn(move || {
+        let stdin = io::stdin();
+        for line in stdin.lock().lines() {
+            match line {
+                Ok(value) => {
+                    if tx.send(value).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    let mut active: Option<(ActiveRecording, Instant)> = None;
+
+    loop {
+        if let Some((_, started_at)) = &active {
+            let remaining = timeout.map(|limit| limit.saturating_sub(started_at.elapsed()));
+            match remaining {
+                Some(wait) if wait.is_zero() => {
+                    let (recording, _) = active.take().expect("recording state present");
+                    println!("Maximum recording duration reached.");
+                    finish_terminal_recording(recording, &config, paths, cli.verbose)?;
+                    println!("Press Enter to start/stop recording. Type q then Enter to quit.");
+                }
+                Some(wait) => match rx.recv_timeout(wait) {
+                    Ok(line) => {
+                        if !handle_session_line(line, &mut active, &config, paths, cli.verbose)? {
+                            break;
+                        }
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        let (recording, _) = active.take().expect("recording state present");
+                        println!("Maximum recording duration reached.");
+                        finish_terminal_recording(recording, &config, paths, cli.verbose)?;
+                        println!("Press Enter to start/stop recording. Type q then Enter to quit.");
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                },
+                None => match rx.recv() {
+                    Ok(line) => {
+                        if !handle_session_line(line, &mut active, &config, paths, cli.verbose)? {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                },
+            }
+        } else {
+            match rx.recv() {
+                Ok(line) => {
+                    if !handle_session_line(line, &mut active, &config, paths, cli.verbose)? {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_session_line(
+    line: String,
+    active: &mut Option<(ActiveRecording, Instant)>,
+    config: &ChirpConfig,
+    paths: &ProjectPaths,
+    verbose: bool,
+) -> Result<bool> {
+    let trimmed = line.trim();
+    if trimmed.eq_ignore_ascii_case("q") {
+        if let Some((recording, _)) = active.take() {
+            println!("Stopping active recording before exit.");
+            finish_terminal_recording(recording, config, paths, verbose)?;
+        }
+        return Ok(false);
+    }
+
+    if active.is_none() {
+        let recording = MicrophoneRecorder::start_default()?;
+        println!("Recording started.");
+        *active = Some((recording, Instant::now()));
+    } else {
+        let (recording, _) = active.take().expect("recording state present");
+        finish_terminal_recording(recording, config, paths, verbose)?;
+        println!("Press Enter to start/stop recording. Type q then Enter to quit.");
+    }
+
+    Ok(true)
+}
+
+fn finish_terminal_recording(
+    recording: ActiveRecording,
+    config: &ChirpConfig,
+    paths: &ProjectPaths,
+    verbose: bool,
+) -> Result<()> {
+    let result = recording.stop()?;
+    let processed = transcribe_buffer(
+        paths,
+        config,
+        &result.audio,
+        None,
+        verbose,
+        Some(&result.summary),
+    )?;
+    if processed.trim().is_empty() {
+        println!("Transcription empty.");
+    } else {
+        println!("{processed}");
+    }
+    Ok(())
+}
+
+fn transcribe_buffer(
+    paths: &ProjectPaths,
+    config: &ChirpConfig,
+    source_audio: &AudioBuffer,
+    wav_output: Option<&std::path::Path>,
+    verbose: bool,
+    capture_summary: Option<&chirp_rust::recording::CaptureSummary>,
+) -> Result<String> {
+    if source_audio.mono_samples.is_empty() {
+        if verbose {
+            println!("audio: empty capture; skipping transcription");
+            if let Some(output) = wav_output {
+                println!("skipped wav save: {}", output.display());
+            }
+        }
+        return Ok(String::new());
+    }
+
+    let model_dir = paths.model_dir(
+        &config.parakeet_model,
+        config.parakeet_quantization.as_deref(),
+    )?;
+    let spec = ParakeetModelSpec::resolve(
+        &config.parakeet_model,
+        config.parakeet_quantization.as_deref(),
+    )?;
+    let audio = source_audio.resample_to(16_000)?;
+
+    if let Some(output) = wav_output {
+        audio.write_wav(output)?;
+    }
+
+    let mut manager = spec.create_manager(&model_dir)?;
+    let decode = manager.greedy_decode_waveform(&audio.mono_samples, 10)?;
+    let processor = TextProcessor::new(config.word_overrides.clone(), &config.post_processing);
+    let processed = processor.process(&decode.text);
+
+    if verbose {
+        if let Some(summary) = capture_summary {
+            println!(
+                "capture: device={:?} source_rate_hz={} source_channels={} captured_samples={} runtime_samples={}",
+                summary.device_name,
+                summary.sample_rate_hz,
+                summary.channels,
+                summary.captured_samples,
+                audio.mono_samples.len(),
+            );
+        } else {
+            println!(
+                "audio: source_rate_hz={} runtime_rate_hz={} channels={} mono_samples={}",
+                source_audio.sample_rate_hz,
+                audio.sample_rate_hz,
+                source_audio.channels,
+                audio.mono_samples.len(),
+            );
+        }
+        println!(
+            "decode: token_ids={:?} timestamps={:?}",
+            decode.token_ids, decode.timestamps
+        );
+        if let Some(output) = wav_output {
+            println!("saved wav: {}", output.display());
+        }
+    }
+
+    Ok(processed)
 }
 
 fn resolve_recording_duration(requested: Option<f32>, configured_max: f32) -> Result<Duration> {
