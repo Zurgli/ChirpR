@@ -7,6 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
+use tracing::{error, info};
 
 use crate::singleton::acquire_named_mutex;
 
@@ -46,7 +47,7 @@ pub fn run_dev(project_root: &Path, interval: Duration, forwarded_args: &[String
     let mut snapshot = snapshot_repo(project_root)?;
     let mut child = start_child_with_retry(project_root, &forwarded_args);
 
-    println!("chirp-dev: watching repo for changes");
+    info!("chirp-dev: watching repo for changes");
 
     loop {
         thread::sleep(interval.max(Duration::from_millis(100)));
@@ -55,7 +56,7 @@ pub fn run_dev(project_root: &Path, interval: Duration, forwarded_args: &[String
             .try_wait()
             .context("failed to poll dev child process")?
         {
-            println!("chirp-dev: app exited with {status}; restarting");
+            info!("chirp-dev: app exited with {status}; restarting");
             child = start_child_with_retry(project_root, &forwarded_args);
             snapshot = snapshot_repo(project_root)?;
             continue;
@@ -63,7 +64,7 @@ pub fn run_dev(project_root: &Path, interval: Duration, forwarded_args: &[String
 
         let new_snapshot = snapshot_repo(project_root)?;
         if let Some(changed) = detect_changes(&snapshot, &new_snapshot) {
-            println!("chirp-dev: change detected in {changed}; restarting");
+            info!("chirp-dev: change detected in {changed}; restarting");
             stop_child(&mut child);
             child = start_child_with_retry(project_root, &forwarded_args);
             snapshot = new_snapshot;
@@ -110,8 +111,8 @@ fn start_child_with_retry(project_root: &Path, forwarded_args: &[String]) -> Chi
         match start_child(project_root, forwarded_args) {
             Ok(child) => return child,
             Err(error) => {
-                eprintln!("chirp-dev: start failed: {error:#}");
-                eprintln!(
+                error!("chirp-dev: start failed: {error:#}");
+                error!(
                     "chirp-dev: retrying in {:.2}s",
                     DEV_RETRY_DELAY.as_secs_f32()
                 );

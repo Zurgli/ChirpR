@@ -40,10 +40,27 @@ That produces:
 - `dist\chirp-rust-windows-x64\chirp-rust.exe`
 - `dist\chirp-rust-windows-x64\config.toml`
 - `dist\chirp-rust-windows-x64\assets\sounds\`
+- `dist\chirp-rust-windows-x64\run-portable.cmd`
+- `dist\chirp-rust-windows-x64\install.cmd`
+- `dist\chirp-rust-windows-x64\uninstall.cmd`
 
-Models are not bundled. After staging or copying the bundle to another machine, run:
+Models are not bundled.
+
+Portable use:
 
 ```powershell
-.\chirp-rust.exe setup
-.\chirp-rust.exe run
+.\run-portable.cmd
 ```
+
+Installed use:
+
+```powershell
+.\install.cmd
+```
+
+The installer prompts for:
+
+- portable vs installed use
+- install directory
+- whether to enable Windows login startup
+- whether to launch immediately after setup

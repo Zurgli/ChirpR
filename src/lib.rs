@@ -1,10 +1,12 @@
 pub mod app;
 pub mod audio;
 pub mod audio_feedback;
+pub mod autostart;
 pub mod cli;
 pub mod config;
 pub mod dev;
 pub mod keyboard;
+pub mod logger;
 pub mod recording;
 pub mod recording_overlay;
 pub mod singleton;

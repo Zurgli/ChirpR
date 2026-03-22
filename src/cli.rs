@@ -24,6 +24,10 @@ pub enum Command {
     Setup,
     Check,
     Run,
+    Autostart {
+        #[arg(value_enum)]
+        action: AutostartCliAction,
+    },
     Dev {
         #[arg(long, default_value_t = 1.0)]
         interval: f32,
@@ -43,4 +47,11 @@ pub enum Command {
         #[arg(long)]
         wav: PathBuf,
     },
+}
+
+#[derive(Debug, Clone, clap::ValueEnum)]
+pub enum AutostartCliAction {
+    Enable,
+    Disable,
+    Status,
 }

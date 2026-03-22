@@ -1,9 +1,11 @@
 use anyhow::Result;
 use chirp_rust::app::{ChirpApp, transcribe_capture};
 use chirp_rust::audio::AudioBuffer;
-use chirp_rust::cli::{Cli, Command};
+use chirp_rust::autostart::{self, AutostartAction};
+use chirp_rust::cli::{AutostartCliAction, Cli, Command};
 use chirp_rust::config::{ChirpConfig, ProjectPaths};
 use chirp_rust::dev::run_dev;
+use chirp_rust::logger;
 use chirp_rust::recording::{ActiveRecording, MicrophoneRecorder};
 use chirp_rust::singleton::acquire_named_mutex;
 use chirp_rust::stt::parakeet::ParakeetModelSpec;
@@ -14,18 +16,20 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
+use tracing::{debug, error, info};
 
 const APP_MUTEX_NAME: &str = "Local\\ChirpRustAppSingleton";
 
 fn main() {
     if let Err(error) = run() {
-        eprintln!("error: {error:#}");
+        error!("{error:#}");
         std::process::exit(1);
     }
 }
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
+    logger::init(cli.verbose);
     let mut paths = ProjectPaths::discover()?;
     if let Some(config_path) = cli.config.as_ref() {
         paths = paths.with_config_path(config_path.clone());
@@ -136,6 +140,15 @@ fn run() -> Result<()> {
             let app = ChirpApp::new(paths.clone())?;
             app.run()?;
         }
+        Command::Autostart { action } => {
+            let exe = std::env::current_exe()?;
+            let action = match action {
+                AutostartCliAction::Enable => AutostartAction::Enable,
+                AutostartCliAction::Disable => AutostartAction::Disable,
+                AutostartCliAction::Status => AutostartAction::Status,
+            };
+            autostart::run(action, &exe)?;
+        }
         Command::Dev {
             interval,
             chirp_args,
@@ -163,7 +176,7 @@ fn run() -> Result<()> {
             )?;
 
             if cli.verbose {
-                println!("record duration_secs={:.2}", duration.as_secs_f32());
+                debug!("record duration_secs={:.2}", duration.as_secs_f32());
             }
 
             println!("{processed}");
@@ -266,7 +279,7 @@ fn handle_session_line(
     let trimmed = line.trim();
     if trimmed.eq_ignore_ascii_case("q") {
         if let Some((recording, _)) = active.take() {
-            println!("Stopping active recording before exit.");
+            info!("Stopping active recording before exit.");
             finish_terminal_recording(recording, config, paths, verbose)?;
         }
         return Ok(false);
@@ -274,7 +287,7 @@ fn handle_session_line(
 
     if active.is_none() {
         let recording = MicrophoneRecorder::start_default()?;
-        println!("Recording started.");
+        info!("Recording started.");
         *active = Some((recording, Instant::now()));
     } else {
         let (recording, _) = active.take().expect("recording state present");
@@ -318,9 +331,9 @@ fn transcribe_buffer(
 ) -> Result<String> {
     if source_audio.mono_samples.is_empty() {
         if verbose {
-            println!("audio: empty capture; skipping transcription");
+            debug!("audio: empty capture; skipping transcription");
             if let Some(output) = wav_output {
-                println!("skipped wav save: {}", output.display());
+                debug!("skipped wav save: {}", output.display());
             }
         }
         return Ok(String::new());
@@ -338,7 +351,7 @@ fn transcribe_buffer(
 
     if verbose {
         if let Some(summary) = capture_summary {
-            println!(
+            debug!(
                 "capture: device={:?} source_rate_hz={} source_channels={} captured_samples={} runtime_samples={}",
                 summary.device_name,
                 summary.sample_rate_hz,
@@ -347,7 +360,7 @@ fn transcribe_buffer(
                 audio.mono_samples.len(),
             );
         } else {
-            println!(
+            debug!(
                 "audio: source_rate_hz={} runtime_rate_hz={} channels={} mono_samples={}",
                 source_audio.sample_rate_hz,
                 audio.sample_rate_hz,
@@ -356,7 +369,7 @@ fn transcribe_buffer(
             );
         }
         if let Some(output) = wav_output {
-            println!("saved wav: {}", output.display());
+            debug!("saved wav: {}", output.display());
         }
     }
 

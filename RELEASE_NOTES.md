@@ -15,8 +15,14 @@
 
 - Added `chirp-rust dev` for automatic restart during development.
 - Added a Windows release staging script at `scripts/build-release.ps1`.
+- Added bundled install and uninstall scripts for Windows local-user deployment.
+- Added a portable `run-portable.cmd` entrypoint and an interactive installer flow.
 
 ### Configuration
 
 - Default hotkey is `ctrl+shift+space`.
 - `config.toml` includes inline comments describing each supported setting.
+
+### Windows integration
+
+- Added `autostart enable|disable|status` support using the current-user Run registry key.
