@@ -1,4 +1,5 @@
 use anyhow::Result;
+use chirp_rust::app::{ChirpApp, transcribe_capture};
 use chirp_rust::audio::AudioBuffer;
 use chirp_rust::cli::{Cli, Command};
 use chirp_rust::config::{ChirpConfig, ProjectPaths};
@@ -121,6 +122,11 @@ fn run() -> Result<()> {
             if cli.verbose {
                 println!("config: {config:#?}");
             }
+        }
+        Command::Run => {
+            chirp_rust::recording_overlay::enable_dpi_awareness();
+            let app = ChirpApp::new(paths.clone())?;
+            app.run()?;
         }
         Command::Listen => {
             run_terminal_session(&cli, &paths)?;
@@ -302,24 +308,15 @@ fn transcribe_buffer(
         return Ok(String::new());
     }
 
-    let model_dir = paths.model_dir(
-        &config.parakeet_model,
-        config.parakeet_quantization.as_deref(),
-    )?;
-    let spec = ParakeetModelSpec::resolve(
-        &config.parakeet_model,
-        config.parakeet_quantization.as_deref(),
-    )?;
     let audio = source_audio.resample_to(16_000)?;
 
     if let Some(output) = wav_output {
         audio.write_wav(output)?;
     }
 
-    let mut manager = spec.create_manager(&model_dir)?;
-    let decode = manager.greedy_decode_waveform(&audio.mono_samples, 10)?;
     let processor = TextProcessor::new(config.word_overrides.clone(), &config.post_processing);
-    let processed = processor.process(&decode.text);
+    let decoded = transcribe_capture(paths, config, &audio, capture_summary)?;
+    let processed = processor.process(&decoded);
 
     if verbose {
         if let Some(summary) = capture_summary {
@@ -340,10 +337,6 @@ fn transcribe_buffer(
                 audio.mono_samples.len(),
             );
         }
-        println!(
-            "decode: token_ids={:?} timestamps={:?}",
-            decode.token_ids, decode.timestamps
-        );
         if let Some(output) = wav_output {
             println!("saved wav: {}", output.display());
         }

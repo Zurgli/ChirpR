@@ -1,6 +1,11 @@
+pub mod app;
 pub mod audio;
+pub mod audio_feedback;
 pub mod cli;
 pub mod config;
+pub mod keyboard;
 pub mod recording;
+pub mod recording_overlay;
 pub mod stt;
+pub mod text_injection;
 pub mod text_processing;

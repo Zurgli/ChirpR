@@ -23,6 +23,7 @@ pub struct Cli {
 pub enum Command {
     Setup,
     Check,
+    Run,
     Listen,
     Record {
         #[arg(long)]
