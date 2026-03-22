@@ -9,6 +9,7 @@ use ort::{
     session::Session,
     value::{TensorRef, ValueType},
 };
+use regex::Regex;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 
@@ -83,6 +84,13 @@ pub struct DecoderStepSummary {
     pub prednet_lengths: Vec<i32>,
     pub output_state_1_shape: Vec<usize>,
     pub output_state_2_shape: Vec<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GreedyDecodeResult {
+    pub token_ids: Vec<usize>,
+    pub text: String,
+    pub timestamps: Vec<usize>,
 }
 
 #[derive(Debug)]
@@ -335,6 +343,94 @@ impl ParakeetManager {
         })
     }
 
+    pub fn greedy_decode_dummy(
+        &mut self,
+        sample_count: usize,
+        max_tokens_per_step: usize,
+    ) -> Result<GreedyDecodeResult> {
+        let frontend = self.run_frontend_outputs(sample_count)?;
+        let bundle = self.load_bundle()?;
+        let blank_idx = bundle
+            .vocabulary
+            .blank_token_id()
+            .context("missing <blk> token in vocabulary")?;
+
+        let mut bootstrap = bundle.vocabulary.build_decoder_bootstrap(1)?;
+        let mut token_ids = Vec::new();
+        let mut timestamps = Vec::new();
+        let mut t = 0_usize;
+        let mut emitted_tokens = 0_usize;
+        let total_steps = frontend
+            .encoder_lengths
+            .get(0)
+            .copied()
+            .unwrap_or_default()
+            .max(0) as usize;
+
+        while t < total_steps {
+            let time_slice = frontend
+                .encoder_outputs
+                .slice(ndarray::s![0..1, .., t..t + 1])
+                .to_owned();
+            let sessions = self
+                .sessions
+                .as_mut()
+                .context("Parakeet sessions were not loaded")?;
+            let decoder_outputs = sessions._decoder_session.run(ort::inputs![
+                TensorRef::from_array_view(&time_slice)?,
+                TensorRef::from_array_view(&bootstrap.targets)?,
+                TensorRef::from_array_view(&bootstrap.target_length)?,
+                TensorRef::from_array_view(&bootstrap.input_states_1)?,
+                TensorRef::from_array_view(&bootstrap.input_states_2)?,
+            ])?;
+
+            let output = decoder_outputs["outputs"]
+                .try_extract_array::<f32>()
+                .context("failed to extract decoder output tensor")?;
+            let squeezed = output.iter().copied().collect::<Vec<_>>();
+            let vocab_size = bundle.vocabulary.vocab_size();
+            let (token_logits, duration_logits) = squeezed.split_at(vocab_size);
+            let token = argmax(token_logits).context("decoder token logits were empty")?;
+            let step = argmax(duration_logits).context("decoder duration logits were empty")?;
+
+            if token != blank_idx {
+                token_ids.push(token);
+                timestamps.push(t);
+                emitted_tokens += 1;
+
+                bootstrap.targets[[0, 0]] = token as i32;
+                bootstrap.target_length[0] = 1;
+                bootstrap.input_states_1 = decoder_outputs["output_states_1"]
+                    .try_extract_array::<f32>()
+                    .context("failed to extract decoder state 1 tensor")?
+                    .to_owned()
+                    .into_dimensionality()
+                    .context("decoder state 1 did not have expected rank")?;
+                bootstrap.input_states_2 = decoder_outputs["output_states_2"]
+                    .try_extract_array::<f32>()
+                    .context("failed to extract decoder state 2 tensor")?
+                    .to_owned()
+                    .into_dimensionality()
+                    .context("decoder state 2 did not have expected rank")?;
+            }
+
+            if step > 0 {
+                t += step;
+                emitted_tokens = 0;
+            } else if token == blank_idx || emitted_tokens == max_tokens_per_step {
+                t += 1;
+                emitted_tokens = 0;
+            }
+        }
+
+        let text = bundle.vocabulary.decode_text(&token_ids);
+        Ok(GreedyDecodeResult {
+            token_ids,
+            text,
+            timestamps,
+        })
+    }
+
     fn run_frontend_outputs(&mut self, sample_count: usize) -> Result<FrontendOutputs> {
         self.ensure_loaded()?;
         let sessions = self
@@ -441,7 +537,10 @@ impl ParakeetBundle {
             .with_context(|| format!("failed to read {}", vocab_path.display()))?;
         let tokens = vocab_raw
             .lines()
-            .filter_map(|line| line.split_once(' ').map(|(token, _)| token.to_string()))
+            .filter_map(|line| {
+                line.split_once(' ')
+                    .map(|(token, _)| token.replace('\u{2581}', " "))
+            })
             .collect::<Vec<_>>();
 
         Ok(Self {
@@ -460,26 +559,48 @@ impl ParakeetVocabulary {
         self.tokens.iter().position(|value| value == token)
     }
 
-    pub fn start_of_transcript_id(&self) -> Option<usize> {
-        self.token_id("<|startoftranscript|>")
+    pub fn blank_token_id(&self) -> Option<usize> {
+        self.token_id("<blk>")
     }
 
-    pub fn blank_token_id(&self) -> usize {
+    pub fn vocab_size(&self) -> usize {
         self.tokens.len()
     }
 
     pub fn build_decoder_bootstrap(&self, batch_size: usize) -> Result<DecoderBootstrap> {
-        let start_token =
-            self.start_of_transcript_id()
-                .context("missing <|startoftranscript|> token in vocabulary")? as i32;
+        let blank_token = self
+            .blank_token_id()
+            .context("missing <blk> token in vocabulary")? as i32;
 
         Ok(DecoderBootstrap {
-            targets: Array2::from_elem((batch_size, 1), start_token),
+            targets: Array2::from_elem((batch_size, 1), blank_token),
             target_length: Array1::from_elem(batch_size, 1_i32),
             input_states_1: Array3::zeros((2, batch_size, 640)),
             input_states_2: Array3::zeros((2, batch_size, 640)),
         })
     }
+
+    pub fn decode_text(&self, token_ids: &[usize]) -> String {
+        let joined = token_ids
+            .iter()
+            .filter_map(|&id| self.tokens.get(id))
+            .filter(|token| !token.starts_with('<'))
+            .fold(String::new(), |mut acc, token| {
+                acc.push_str(token);
+                acc
+            });
+        let whitespace = Regex::new(r"\s+").expect("valid regex");
+        whitespace.replace_all(joined.trim(), " ").to_string()
+    }
+}
+
+fn argmax(values: &[f32]) -> Option<usize> {
+    values
+        .iter()
+        .copied()
+        .enumerate()
+        .max_by(|(_, left), (_, right)| left.total_cmp(right))
+        .map(|(index, _)| index)
 }
 
 fn summarize_outlets(outlets: &[ort::value::Outlet]) -> Vec<OutletSummary> {
@@ -615,11 +736,7 @@ mod tests {
     #[test]
     fn vocabulary_builds_decoder_bootstrap() {
         let vocabulary = ParakeetVocabulary {
-            tokens: vec![
-                "<unk>".into(),
-                "<|startoftranscript|>".into(),
-                "hello".into(),
-            ],
+            tokens: vec!["<unk>".into(), "<blk>".into(), "hello".into()],
         };
 
         let bootstrap = vocabulary.build_decoder_bootstrap(2).unwrap();
@@ -628,7 +745,21 @@ mod tests {
         assert_eq!(bootstrap.targets[[0, 0]], 1);
         assert_eq!(bootstrap.input_states_1.shape(), &[2, 2, 640]);
         assert_eq!(bootstrap.input_states_2.shape(), &[2, 2, 640]);
-        assert_eq!(vocabulary.blank_token_id(), 3);
+        assert_eq!(vocabulary.blank_token_id(), Some(1));
+    }
+
+    #[test]
+    fn vocabulary_decodes_plain_text() {
+        let vocabulary = ParakeetVocabulary {
+            tokens: vec![
+                "<blk>".into(),
+                " hello".into(),
+                " world".into(),
+                "<|endoftext|>".into(),
+            ],
+        };
+
+        assert_eq!(vocabulary.decode_text(&[1, 2, 3]), "hello world");
     }
 
     #[test]
@@ -672,5 +803,22 @@ mod tests {
         assert_eq!(summary.output_state_1_shape, vec![2, 1, 640]);
         assert_eq!(summary.output_state_2_shape, vec![2, 1, 640]);
         assert_eq!(summary.prednet_lengths, vec![1]);
+    }
+
+    #[test]
+    fn manager_runs_dummy_greedy_decode() {
+        let spec = ParakeetModelSpec::resolve("nemo-parakeet-tdt-0.6b-v3", Some("int8")).unwrap();
+        let model_dir = PathBuf::from(
+            r"E:\development\chirp\chirp-rust\assets\models\nemo-parakeet-tdt-0.6b-v3-int8",
+        );
+
+        if !spec.is_prepared(&model_dir) {
+            return;
+        }
+
+        let mut manager =
+            ParakeetManager::new(model_dir, spec, Some(Duration::from_secs(300))).unwrap();
+        let decode = manager.greedy_decode_dummy(1600, 10).unwrap();
+        assert_eq!(decode.timestamps.len(), decode.token_ids.len());
     }
 }

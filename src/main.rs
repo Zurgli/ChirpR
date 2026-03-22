@@ -59,7 +59,7 @@ fn run() -> Result<()> {
                     let bundle = manager.load_bundle()?;
                     let bootstrap = bundle.vocabulary.build_decoder_bootstrap(1)?;
                     println!(
-                        "bundle: model_type={} features_size={} subsampling_factor={} vocab_size={} blank_token_id={}",
+                        "bundle: model_type={} features_size={} subsampling_factor={} vocab_size={} blank_token_id={:?}",
                         bundle.config.model_type,
                         bundle.config.features_size,
                         bundle.config.subsampling_factor,
@@ -76,6 +76,7 @@ fn run() -> Result<()> {
                     let mut runtime_manager = manager;
                     let frontend = runtime_manager.run_frontend_dummy(1600)?;
                     let decoder = runtime_manager.run_decoder_dummy_step(1600)?;
+                    let greedy_decode = runtime_manager.greedy_decode_dummy(1600, 10)?;
                     println!(
                         "frontend pass: waveform_shape={:?} feature_shape={:?} feature_lengths={:?} encoder_shape={:?} encoder_lengths={:?}",
                         frontend.waveform_shape,
@@ -90,6 +91,10 @@ fn run() -> Result<()> {
                         decoder.prednet_lengths,
                         decoder.output_state_1_shape,
                         decoder.output_state_2_shape,
+                    );
+                    println!(
+                        "greedy decode: token_ids={:?} timestamps={:?} text={:?}",
+                        greedy_decode.token_ids, greedy_decode.timestamps, greedy_decode.text,
                     );
                     for session in runtime_manager.describe() {
                         println!("{} inputs:", session.label);
