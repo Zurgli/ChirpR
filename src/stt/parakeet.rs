@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use ndarray::{Array1, Array2, Array3};
+use ndarray::{Array1, Array2, Array3, ArrayD};
 use ort::{
     session::Session,
     value::{TensorRef, ValueType},
@@ -77,11 +77,27 @@ pub struct FrontendPassSummary {
     pub encoder_lengths: Vec<i64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecoderStepSummary {
+    pub logits_shape: Vec<usize>,
+    pub prednet_lengths: Vec<i32>,
+    pub output_state_1_shape: Vec<usize>,
+    pub output_state_2_shape: Vec<usize>,
+}
+
 #[derive(Debug)]
 struct ParakeetSessions {
     _encoder_session: Session,
     _decoder_session: Session,
     _feature_session: Session,
+}
+
+struct FrontendOutputs {
+    waveform: Array2<f32>,
+    features: ArrayD<f32>,
+    feature_lengths: Array1<i64>,
+    encoder_outputs: ArrayD<f32>,
+    encoder_lengths: Array1<i64>,
 }
 
 impl ParakeetModelSpec {
@@ -271,6 +287,55 @@ impl ParakeetManager {
     }
 
     pub fn run_frontend_dummy(&mut self, sample_count: usize) -> Result<FrontendPassSummary> {
+        let frontend = self.run_frontend_outputs(sample_count)?;
+        Ok(FrontendPassSummary {
+            waveform_shape: frontend.waveform.shape().to_vec(),
+            feature_shape: frontend.features.shape().to_vec(),
+            feature_lengths: frontend.feature_lengths.iter().copied().collect(),
+            encoder_shape: frontend.encoder_outputs.shape().to_vec(),
+            encoder_lengths: frontend.encoder_lengths.iter().copied().collect(),
+        })
+    }
+
+    pub fn run_decoder_dummy_step(&mut self, sample_count: usize) -> Result<DecoderStepSummary> {
+        let frontend = self.run_frontend_outputs(sample_count)?;
+        let bundle = self.load_bundle()?;
+        let bootstrap = bundle.vocabulary.build_decoder_bootstrap(1)?;
+        let sessions = self
+            .sessions
+            .as_mut()
+            .context("Parakeet sessions were not loaded")?;
+
+        let decoder_outputs = sessions._decoder_session.run(ort::inputs![
+            TensorRef::from_array_view(&frontend.encoder_outputs)?,
+            TensorRef::from_array_view(&bootstrap.targets)?,
+            TensorRef::from_array_view(&bootstrap.target_length)?,
+            TensorRef::from_array_view(&bootstrap.input_states_1)?,
+            TensorRef::from_array_view(&bootstrap.input_states_2)?,
+        ])?;
+
+        let logits = decoder_outputs["outputs"]
+            .try_extract_array::<f32>()
+            .context("failed to extract decoder logits tensor")?;
+        let prednet_lengths = decoder_outputs["prednet_lengths"]
+            .try_extract_array::<i32>()
+            .context("failed to extract decoder prednet lengths tensor")?;
+        let output_state_1 = decoder_outputs["output_states_1"]
+            .try_extract_array::<f32>()
+            .context("failed to extract decoder state 1 tensor")?;
+        let output_state_2 = decoder_outputs["output_states_2"]
+            .try_extract_array::<f32>()
+            .context("failed to extract decoder state 2 tensor")?;
+
+        Ok(DecoderStepSummary {
+            logits_shape: logits.shape().to_vec(),
+            prednet_lengths: prednet_lengths.iter().copied().collect(),
+            output_state_1_shape: output_state_1.shape().to_vec(),
+            output_state_2_shape: output_state_2.shape().to_vec(),
+        })
+    }
+
+    fn run_frontend_outputs(&mut self, sample_count: usize) -> Result<FrontendOutputs> {
         self.ensure_loaded()?;
         let sessions = self
             .sessions
@@ -309,12 +374,12 @@ impl ParakeetManager {
             .try_extract_array::<i64>()
             .context("failed to extract encoder lengths tensor")?;
 
-        Ok(FrontendPassSummary {
-            waveform_shape: waveform.shape().to_vec(),
-            feature_shape: feature_array.shape().to_vec(),
-            feature_lengths: feature_lengths_vec,
-            encoder_shape: encoded.shape().to_vec(),
-            encoder_lengths: encoded_lengths.iter().copied().collect(),
+        Ok(FrontendOutputs {
+            waveform,
+            features: feature_array,
+            feature_lengths: feature_length_input,
+            encoder_outputs: encoded.to_owned(),
+            encoder_lengths: Array1::from_iter(encoded_lengths.iter().copied()),
         })
     }
 
@@ -587,5 +652,25 @@ mod tests {
         assert_eq!(summary.encoder_shape[1], 1024);
         assert_eq!(summary.feature_lengths.len(), 1);
         assert_eq!(summary.encoder_lengths.len(), 1);
+    }
+
+    #[test]
+    fn manager_runs_dummy_decoder_step() {
+        let spec = ParakeetModelSpec::resolve("nemo-parakeet-tdt-0.6b-v3", Some("int8")).unwrap();
+        let model_dir = PathBuf::from(
+            r"E:\development\chirp\chirp-rust\assets\models\nemo-parakeet-tdt-0.6b-v3-int8",
+        );
+
+        if !spec.is_prepared(&model_dir) {
+            return;
+        }
+
+        let mut manager =
+            ParakeetManager::new(model_dir, spec, Some(Duration::from_secs(300))).unwrap();
+        let summary = manager.run_decoder_dummy_step(1600).unwrap();
+        assert_eq!(summary.logits_shape[0], 1);
+        assert_eq!(summary.output_state_1_shape, vec![2, 1, 640]);
+        assert_eq!(summary.output_state_2_shape, vec![2, 1, 640]);
+        assert_eq!(summary.prednet_lengths, vec![1]);
     }
 }

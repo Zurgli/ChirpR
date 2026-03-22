@@ -75,6 +75,7 @@ fn run() -> Result<()> {
                     );
                     let mut runtime_manager = manager;
                     let frontend = runtime_manager.run_frontend_dummy(1600)?;
+                    let decoder = runtime_manager.run_decoder_dummy_step(1600)?;
                     println!(
                         "frontend pass: waveform_shape={:?} feature_shape={:?} feature_lengths={:?} encoder_shape={:?} encoder_lengths={:?}",
                         frontend.waveform_shape,
@@ -82,6 +83,13 @@ fn run() -> Result<()> {
                         frontend.feature_lengths,
                         frontend.encoder_shape,
                         frontend.encoder_lengths,
+                    );
+                    println!(
+                        "decoder step: logits_shape={:?} prednet_lengths={:?} state_1_shape={:?} state_2_shape={:?}",
+                        decoder.logits_shape,
+                        decoder.prednet_lengths,
+                        decoder.output_state_1_shape,
+                        decoder.output_state_2_shape,
                     );
                     for session in runtime_manager.describe() {
                         println!("{} inputs:", session.label);
