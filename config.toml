@@ -1,4 +1,4 @@
-primary_shortcut = "ctrl+shift"
+primary_shortcut = "ctrl+shift+space"
 stt_backend = "parakeet"
 parakeet_model = "nemo-parakeet-tdt-0.6b-v3"
 parakeet_quantization = "int8"

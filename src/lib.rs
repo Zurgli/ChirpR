@@ -3,6 +3,7 @@ pub mod audio;
 pub mod audio_feedback;
 pub mod cli;
 pub mod config;
+pub mod dev;
 pub mod keyboard;
 pub mod recording;
 pub mod recording_overlay;

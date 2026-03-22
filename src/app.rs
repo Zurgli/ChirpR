@@ -113,7 +113,7 @@ impl ChirpApp {
             state.recording_started_at = None;
             drop(state);
             if let Ok(overlay) = self.overlay.lock() {
-                overlay.hide();
+                overlay.show("loading");
             }
             self.audio_feedback
                 .play_stop(self.config.stop_sound_path.as_deref());
@@ -152,10 +152,6 @@ impl ChirpApp {
                     return;
                 }
             };
-
-            if let Ok(overlay) = overlay.lock() {
-                overlay.show("loading");
-            }
 
             match transcribe_capture(
                 &paths,

@@ -24,6 +24,13 @@ pub enum Command {
     Setup,
     Check,
     Run,
+    Dev {
+        #[arg(long, default_value_t = 1.0)]
+        interval: f32,
+
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        chirp_args: Vec<String>,
+    },
     Listen,
     Record {
         #[arg(long)]

@@ -3,6 +3,7 @@ use chirp_rust::app::{ChirpApp, transcribe_capture};
 use chirp_rust::audio::AudioBuffer;
 use chirp_rust::cli::{Cli, Command};
 use chirp_rust::config::{ChirpConfig, ProjectPaths};
+use chirp_rust::dev::run_dev;
 use chirp_rust::recording::{ActiveRecording, MicrophoneRecorder};
 use chirp_rust::stt::parakeet::ParakeetModelSpec;
 use chirp_rust::text_processing::TextProcessor;
@@ -127,6 +128,16 @@ fn run() -> Result<()> {
             chirp_rust::recording_overlay::enable_dpi_awareness();
             let app = ChirpApp::new(paths.clone())?;
             app.run()?;
+        }
+        Command::Dev {
+            interval,
+            chirp_args,
+        } => {
+            run_dev(
+                &paths.project_root,
+                Duration::from_secs_f32(interval.max(0.1)),
+                &chirp_args,
+            )?;
         }
         Command::Listen => {
             run_terminal_session(&cli, &paths)?;

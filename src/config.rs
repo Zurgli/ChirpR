@@ -6,7 +6,7 @@ use anyhow::{Context, Result, bail};
 use regex::Regex;
 use serde::Deserialize;
 
-pub const DEFAULT_PRIMARY_SHORTCUT: &str = "ctrl+shift";
+pub const DEFAULT_PRIMARY_SHORTCUT: &str = "ctrl+shift+space";
 pub const DEFAULT_STT_BACKEND: &str = "parakeet";
 pub const DEFAULT_PARAKEET_MODEL: &str = "nemo-parakeet-tdt-0.6b-v3";
 pub const DEFAULT_ONNX_PROVIDERS: &str = "cpu";
@@ -451,7 +451,7 @@ mod tests {
     #[test]
     fn raw_config_normalizes_keys() {
         let raw = RawConfig {
-            primary_shortcut: Some("CTRL+SHIFT".into()),
+            primary_shortcut: Some("CTRL+SHIFT+SPACE".into()),
             stt_backend: None,
             parakeet_model: None,
             parakeet_quantization: Some("INT8".into()),
@@ -475,7 +475,7 @@ mod tests {
         };
 
         let config = ChirpConfig::from_raw(raw);
-        assert_eq!(config.primary_shortcut, "ctrl+shift");
+        assert_eq!(config.primary_shortcut, "ctrl+shift+space");
         assert_eq!(config.parakeet_quantization.as_deref(), Some("int8"));
         assert_eq!(config.onnx_providers, "cpu");
         assert_eq!(config.injection_mode, "paste");

@@ -7,26 +7,50 @@ use std::time::Duration;
 
 use windows_sys::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
-    BeginPaint, CreateSolidBrush, DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteObject, DrawTextW,
-    Ellipse, EndPaint, FillRect, InvalidateRect, PAINTSTRUCT, SetBkMode, SetTextColor, TRANSPARENT,
-    UpdateWindow,
+    BeginPaint, CreateRoundRectRgn, CreateSolidBrush, DT_CENTER, DT_SINGLELINE, DT_VCENTER,
+    DeleteObject, DrawTextW, Ellipse, EndPaint, FillRect, InvalidateRect, PAINTSTRUCT, RoundRect,
+    SelectObject, SetBkMode, SetTextColor, SetWindowRgn, TRANSPARENT, UpdateWindow,
+};
+use windows_sys::Win32::Graphics::GdiPlus::{
+    CompositingQualityHighQuality, FillModeAlternate, GdipAddPathArc, GdipAddPathLine,
+    GdipClosePathFigure, GdipCreateFromHDC, GdipCreatePath, GdipCreatePen1,
+    GdipCreateSolidFill, GdipDeleteBrush, GdipDeleteGraphics, GdipDeletePath, GdipDeletePen,
+    GdipDrawPath, GdipFillEllipseI, GdipFillPath, GdipGraphicsClear, GdipSetCompositingQuality,
+    GdipSetPixelOffsetMode, GdipSetSmoothingMode, GdipSetTextRenderingHint, GdiplusStartup,
+    GdiplusStartupInput, GpBrush, GpGraphics, GpPath, GpPen, LineJoinRound,
+    PixelOffsetModeHalf, SmoothingModeAntiAlias, TextRenderingHintClearTypeGridFit, UnitPixel,
+};
+use windows_sys::Win32::UI::HiDpi::{
+    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForSystem, GetDpiForWindow,
+    SetProcessDpiAwarenessContext,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
     GetClientRect, GetMessageW, GetSystemMetrics, MSG, PostMessageW, PostQuitMessage,
-    RegisterClassW, SM_CXSCREEN, SW_HIDE, SW_SHOWNOACTIVATE, SetProcessDPIAware, ShowWindow,
-    TranslateMessage, WM_APP, WM_CLOSE, WM_DESTROY, WM_PAINT, WNDCLASSW, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    RegisterClassW, SM_CXSCREEN, SW_HIDE, SW_SHOWNOACTIVATE, SetProcessDPIAware, SetWindowPos,
+    ShowWindow, TranslateMessage, WM_APP, WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_PAINT,
+    WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, SWP_NOACTIVATE,
+    SWP_NOZORDER,
 };
 
 const WM_APP_SHOW: u32 = WM_APP + 1;
 const WM_APP_HIDE: u32 = WM_APP + 2;
 const WM_APP_CLOSE: u32 = WM_APP + 3;
 const WM_APP_SET_MODE: u32 = WM_APP + 4;
+const BASE_OVERLAY_WIDTH: i32 = 168;
+const BASE_OVERLAY_HEIGHT: i32 = 30;
+const BASE_TOP_MARGIN: i32 = 0;
+const BASE_CORNER_RADIUS: i32 = 14;
+const BASE_DOT_LEFT: i32 = 16;
+const BASE_DOT_TOP: i32 = 10;
+const BASE_DOT_SIZE: i32 = 6;
+const BASE_TEXT_LEFT: i32 = 30;
+const BASE_TEXT_RIGHT: i32 = 12;
 
 static CLASS_NAME: &str = "ChirpRustRecordingOverlay";
 static OVERLAY_STATE: OnceLock<Arc<Mutex<OverlayState>>> = OnceLock::new();
+static GDIPLUS_TOKEN: OnceLock<Option<usize>> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OverlayGeometry {
@@ -166,8 +190,9 @@ fn spawn_overlay_thread(
         };
         let _ = RegisterClassW(&wnd_class);
 
-        let screen_width = GetSystemMetrics(SM_CXSCREEN);
-        let geometry = compute_top_center_geometry(screen_width, 168, 30, 0);
+        let dpi = current_dpi(ptr::null_mut());
+        let screen_width = screen_width_for_dpi(dpi);
+        let geometry = overlay_geometry_for_dpi(screen_width, dpi);
         let title = widestr("Chirp Rust");
         let hwnd = CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
@@ -183,6 +208,10 @@ fn spawn_overlay_thread(
             h_instance,
             ptr::null(),
         );
+
+        if !hwnd.is_null() {
+            apply_overlay_region(hwnd, geometry.width, geometry.height, scale_i32(BASE_CORNER_RADIUS, dpi));
+        }
 
         if let Ok(mut slot) = hwnd_slot.lock() {
             *slot = hwnd as isize;
@@ -225,6 +254,29 @@ unsafe extern "system" fn window_proc(
             }
             0
         }
+        WM_DPICHANGED => {
+            let dpi = (w_param & 0xFFFF) as u32;
+            let geometry = overlay_geometry_for_dpi(screen_width_for_dpi(dpi), dpi);
+            unsafe {
+                apply_overlay_region(
+                    hwnd,
+                    geometry.width,
+                    geometry.height,
+                    scale_i32(BASE_CORNER_RADIUS, dpi),
+                );
+                let _ = SetWindowPos(
+                    hwnd,
+                    ptr::null_mut(),
+                    geometry.x,
+                    geometry.y,
+                    geometry.width,
+                    geometry.height,
+                    SWP_NOACTIVATE | SWP_NOZORDER,
+                );
+                let _ = InvalidateRect(hwnd, ptr::null(), 1);
+            }
+            0
+        }
         WM_APP_CLOSE | WM_CLOSE => {
             unsafe {
                 let _ = DestroyWindow(hwnd);
@@ -251,23 +303,19 @@ fn paint_overlay(hwnd: HWND) {
         let hdc = BeginPaint(hwnd, &mut ps);
         let mut rect: RECT = std::mem::zeroed();
         let _ = GetClientRect(hwnd, &mut rect);
+        let dpi = current_dpi(hwnd);
+        let metrics = overlay_metrics(dpi);
 
-        let background = CreateSolidBrush(rgb(245, 245, 247));
-        let _ = FillRect(hdc, &rect, background);
-        let _ = DeleteObject(background as _);
-
-        let dot_brush = CreateSolidBrush(rgb(255, 59, 48));
-        let old_brush = windows_sys::Win32::Graphics::Gdi::SelectObject(hdc, dot_brush as _);
-        let _ = Ellipse(hdc, 16, 10, 22, 16);
-        let _ = windows_sys::Win32::Graphics::Gdi::SelectObject(hdc, old_brush);
-        let _ = DeleteObject(dot_brush as _);
+        if !paint_overlay_antialiased(hdc, &rect, &metrics) {
+            paint_overlay_fallback_gdi(hdc, &rect, &metrics);
+        }
 
         let _ = SetBkMode(hdc, TRANSPARENT as i32);
         let _ = SetTextColor(hdc, rgb(17, 17, 17) as COLORREF);
         let mut text_rect = RECT {
-            left: 30,
+            left: metrics.text_left,
             top: 0,
-            right: rect.right - 10,
+            right: rect.right - metrics.text_right,
             bottom: rect.bottom,
         };
 
@@ -282,6 +330,238 @@ fn paint_overlay(hwnd: HWND) {
 
         EndPaint(hwnd, &ps);
     }
+}
+
+unsafe fn apply_overlay_region(hwnd: HWND, width: i32, height: i32, radius: i32) {
+    let square_top = radius.max(1);
+    let region = unsafe {
+        CreateRoundRectRgn(
+            0,
+            -square_top,
+            width + 1,
+            height + 1,
+            radius * 2,
+            radius * 2,
+        )
+    };
+    if !region.is_null() {
+        let _ = unsafe { SetWindowRgn(hwnd, region, 1) };
+    }
+}
+
+fn paint_overlay_antialiased(
+    hdc: windows_sys::Win32::Graphics::Gdi::HDC,
+    rect: &RECT,
+    metrics: &OverlayMetrics,
+) -> bool {
+    if !ensure_gdiplus() {
+        return false;
+    }
+
+    unsafe {
+        let mut graphics: *mut GpGraphics = ptr::null_mut();
+        if GdipCreateFromHDC(hdc, &mut graphics) != 0 || graphics.is_null() {
+            return false;
+        }
+
+        let mut path: *mut GpPath = ptr::null_mut();
+        let mut fill: *mut windows_sys::Win32::Graphics::GdiPlus::GpSolidFill = ptr::null_mut();
+        let mut pen: *mut GpPen = ptr::null_mut();
+        let mut dot: *mut windows_sys::Win32::Graphics::GdiPlus::GpSolidFill = ptr::null_mut();
+
+        let _ = GdipSetSmoothingMode(graphics, SmoothingModeAntiAlias);
+        let _ = GdipSetCompositingQuality(graphics, CompositingQualityHighQuality);
+        let _ = GdipSetPixelOffsetMode(graphics, PixelOffsetModeHalf);
+        let _ = GdipSetTextRenderingHint(graphics, TextRenderingHintClearTypeGridFit);
+        let _ = GdipGraphicsClear(graphics, argb(255, 247, 247, 249));
+
+        let mut ok = GdipCreatePath(FillModeAlternate, &mut path) == 0 && !path.is_null();
+        if ok {
+            ok = build_overlay_path(path, rect, metrics.corner_radius);
+        }
+        if ok {
+            ok = GdipCreateSolidFill(argb(255, 247, 247, 249), &mut fill) == 0
+                && !fill.is_null()
+                && GdipCreatePen1(argb(255, 212, 212, 218), 1.0, UnitPixel, &mut pen) == 0
+                && !pen.is_null()
+                && GdipCreateSolidFill(argb(255, 255, 59, 48), &mut dot) == 0
+                && !dot.is_null();
+        }
+        if ok {
+            let _ = windows_sys::Win32::Graphics::GdiPlus::GdipSetPenLineJoin(pen, LineJoinRound);
+            ok = GdipFillPath(graphics, fill as *mut GpBrush, path) == 0
+                && GdipDrawPath(graphics, pen, path) == 0
+                && GdipFillEllipseI(
+                    graphics,
+                    dot as *mut GpBrush,
+                    metrics.dot_left,
+                    metrics.dot_top,
+                    metrics.dot_size,
+                    metrics.dot_size,
+                ) == 0;
+        }
+
+        if !dot.is_null() {
+            let _ = GdipDeleteBrush(dot as *mut GpBrush);
+        }
+        if !pen.is_null() {
+            let _ = GdipDeletePen(pen);
+        }
+        if !fill.is_null() {
+            let _ = GdipDeleteBrush(fill as *mut GpBrush);
+        }
+        if !path.is_null() {
+            let _ = GdipDeletePath(path);
+        }
+        let _ = GdipDeleteGraphics(graphics);
+
+        ok
+    }
+}
+
+fn paint_overlay_fallback_gdi(
+    hdc: windows_sys::Win32::Graphics::Gdi::HDC,
+    rect: &RECT,
+    metrics: &OverlayMetrics,
+) {
+    unsafe {
+        let background = CreateSolidBrush(rgb(247, 247, 249));
+        let border_pen = windows_sys::Win32::Graphics::Gdi::CreatePen(
+            windows_sys::Win32::Graphics::Gdi::PS_SOLID,
+            1,
+            rgb(212, 212, 218),
+        );
+        let old_brush = SelectObject(hdc, background as _);
+        let old_pen = SelectObject(hdc, border_pen as _);
+        let _ = FillRect(hdc, rect, background);
+        let _ = RoundRect(
+            hdc,
+            rect.left,
+            rect.top,
+            rect.right,
+            rect.bottom,
+            metrics.corner_radius * 2,
+            metrics.corner_radius * 2,
+        );
+        let _ = SelectObject(hdc, old_pen);
+        let _ = SelectObject(hdc, old_brush);
+        let _ = DeleteObject(border_pen as _);
+        let _ = DeleteObject(background as _);
+
+        let dot_brush = CreateSolidBrush(rgb(255, 59, 48));
+        let old_brush = SelectObject(hdc, dot_brush as _);
+        let _ = Ellipse(
+            hdc,
+            metrics.dot_left,
+            metrics.dot_top,
+            metrics.dot_left + metrics.dot_size,
+            metrics.dot_top + metrics.dot_size,
+        );
+        let _ = SelectObject(hdc, old_brush);
+        let _ = DeleteObject(dot_brush as _);
+    }
+}
+
+unsafe fn build_overlay_path(path: *mut GpPath, rect: &RECT, radius: i32) -> bool {
+    let left = rect.left as f32;
+    let top = rect.top as f32;
+    let right = rect.right as f32 - 1.0;
+    let bottom = rect.bottom as f32 - 1.0;
+    let radius = radius.max(1) as f32;
+    let diameter = radius * 2.0;
+
+    unsafe {
+        GdipAddPathLine(path, left, top, right, top) == 0
+            && GdipAddPathLine(path, right, top, right, bottom - radius) == 0
+            && GdipAddPathArc(
+                path,
+                right - diameter,
+                bottom - diameter,
+                diameter,
+                diameter,
+                0.0,
+                90.0,
+            ) == 0
+            && GdipAddPathLine(path, right - radius, bottom, left + radius, bottom) == 0
+            && GdipAddPathArc(path, left, bottom - diameter, diameter, diameter, 90.0, 90.0)
+                == 0
+            && GdipAddPathLine(path, left, bottom - radius, left, top) == 0
+            && GdipClosePathFigure(path) == 0
+    }
+}
+
+fn ensure_gdiplus() -> bool {
+    GDIPLUS_TOKEN
+        .get_or_init(|| unsafe {
+            let mut token = 0usize;
+            let input = GdiplusStartupInput {
+                GdiplusVersion: 1,
+                DebugEventCallback: 0,
+                SuppressBackgroundThread: 0,
+                SuppressExternalCodecs: 0,
+            };
+
+            if GdiplusStartup(&mut token, &input, ptr::null_mut()) == 0 {
+                Some(token)
+            } else {
+                None
+            }
+        })
+        .is_some()
+}
+
+#[derive(Debug, Clone, Copy)]
+struct OverlayMetrics {
+    corner_radius: i32,
+    dot_left: i32,
+    dot_top: i32,
+    dot_size: i32,
+    text_left: i32,
+    text_right: i32,
+}
+
+fn overlay_metrics(dpi: u32) -> OverlayMetrics {
+    OverlayMetrics {
+        corner_radius: scale_i32(BASE_CORNER_RADIUS, dpi),
+        dot_left: scale_i32(BASE_DOT_LEFT, dpi),
+        dot_top: scale_i32(BASE_DOT_TOP, dpi),
+        dot_size: scale_i32(BASE_DOT_SIZE, dpi),
+        text_left: scale_i32(BASE_TEXT_LEFT, dpi),
+        text_right: scale_i32(BASE_TEXT_RIGHT, dpi),
+    }
+}
+
+fn overlay_geometry_for_dpi(screen_width: i32, dpi: u32) -> OverlayGeometry {
+    compute_top_center_geometry(
+        screen_width,
+        scale_i32(BASE_OVERLAY_WIDTH, dpi),
+        scale_i32(BASE_OVERLAY_HEIGHT, dpi),
+        scale_i32(BASE_TOP_MARGIN, dpi),
+    )
+}
+
+fn current_dpi(hwnd: HWND) -> u32 {
+    unsafe {
+        let dpi = if hwnd.is_null() {
+            GetDpiForSystem()
+        } else {
+            GetDpiForWindow(hwnd)
+        };
+        if dpi == 0 { 96 } else { dpi }
+    }
+}
+
+fn screen_width_for_dpi(dpi: u32) -> i32 {
+    let _ = dpi;
+    unsafe { GetSystemMetrics(SM_CXSCREEN) }
+}
+
+fn scale_i32(value: i32, dpi: u32) -> i32 {
+    (((value as i64) * (dpi as i64)) / 96).max(1) as i32
+}
+
+const fn argb(alpha: u8, red: u8, green: u8, blue: u8) -> u32 {
+    ((alpha as u32) << 24) | ((red as u32) << 16) | ((green as u32) << 8) | blue as u32
 }
 
 fn current_label() -> Vec<u16> {
@@ -319,9 +599,20 @@ pub fn compute_top_center_geometry(
 pub fn enable_dpi_awareness() {
     #[cfg(target_os = "windows")]
     unsafe {
-        let _ = SetProcessDPIAware();
+        if SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) == 0 {
+            let _ = SetProcessDPIAware();
+        }
     }
 }
+
+impl Drop for RecordingOverlay {
+    fn drop(&mut self) {
+        if Arc::strong_count(&self.hwnd) == 1 {
+            self.close();
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
