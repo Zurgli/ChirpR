@@ -73,7 +73,17 @@ fn run() -> Result<()> {
                         bootstrap.input_states_1.shape(),
                         bootstrap.input_states_2.shape(),
                     );
-                    for session in manager.describe() {
+                    let mut runtime_manager = manager;
+                    let frontend = runtime_manager.run_frontend_dummy(1600)?;
+                    println!(
+                        "frontend pass: waveform_shape={:?} feature_shape={:?} feature_lengths={:?} encoder_shape={:?} encoder_lengths={:?}",
+                        frontend.waveform_shape,
+                        frontend.feature_shape,
+                        frontend.feature_lengths,
+                        frontend.encoder_shape,
+                        frontend.encoder_lengths,
+                    );
+                    for session in runtime_manager.describe() {
                         println!("{} inputs:", session.label);
                         for input in session.inputs {
                             println!("  - {} :: {}", input.name, input.dtype);

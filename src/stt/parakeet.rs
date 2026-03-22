@@ -5,7 +5,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use ndarray::{Array1, Array2, Array3};
-use ort::{session::Session, value::ValueType};
+use ort::{
+    session::Session,
+    value::{TensorRef, ValueType},
+};
 use reqwest::blocking::Client;
 use serde::Deserialize;
 
@@ -63,6 +66,15 @@ pub struct DecoderBootstrap {
     pub target_length: Array1<i32>,
     pub input_states_1: Array3<f32>,
     pub input_states_2: Array3<f32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontendPassSummary {
+    pub waveform_shape: Vec<usize>,
+    pub feature_shape: Vec<usize>,
+    pub feature_lengths: Vec<i64>,
+    pub encoder_shape: Vec<usize>,
+    pub encoder_lengths: Vec<i64>,
 }
 
 #[derive(Debug)]
@@ -256,6 +268,54 @@ impl ParakeetManager {
                 outputs: summarize_outlets(sessions._feature_session.outputs()),
             },
         ]
+    }
+
+    pub fn run_frontend_dummy(&mut self, sample_count: usize) -> Result<FrontendPassSummary> {
+        self.ensure_loaded()?;
+        let sessions = self
+            .sessions
+            .as_mut()
+            .context("Parakeet sessions were not loaded")?;
+
+        let waveform = Array2::<f32>::zeros((1, sample_count));
+        let waveform_lens = Array1::<i64>::from_vec(vec![sample_count as i64]);
+
+        let feature_outputs = sessions._feature_session.run(ort::inputs![
+            TensorRef::from_array_view(&waveform)?,
+            TensorRef::from_array_view(&waveform_lens)?,
+        ])?;
+
+        let features = feature_outputs["features"]
+            .try_extract_array::<f32>()
+            .context("failed to extract nemo128 features tensor")?;
+        let feature_lengths = feature_outputs["features_lens"]
+            .try_extract_array::<i64>()
+            .context("failed to extract nemo128 feature length tensor")?;
+
+        let feature_array = features.to_owned();
+        let feature_lengths_vec = feature_lengths.iter().copied().collect::<Vec<_>>();
+        drop(feature_outputs);
+
+        let feature_length_input = Array1::<i64>::from_vec(feature_lengths_vec.clone());
+        let encoder_outputs = sessions._encoder_session.run(ort::inputs![
+            TensorRef::from_array_view(&feature_array)?,
+            TensorRef::from_array_view(&feature_length_input)?,
+        ])?;
+
+        let encoded = encoder_outputs["outputs"]
+            .try_extract_array::<f32>()
+            .context("failed to extract encoder output tensor")?;
+        let encoded_lengths = encoder_outputs["encoded_lengths"]
+            .try_extract_array::<i64>()
+            .context("failed to extract encoder lengths tensor")?;
+
+        Ok(FrontendPassSummary {
+            waveform_shape: waveform.shape().to_vec(),
+            feature_shape: feature_array.shape().to_vec(),
+            feature_lengths: feature_lengths_vec,
+            encoder_shape: encoded.shape().to_vec(),
+            encoder_lengths: encoded_lengths.iter().copied().collect(),
+        })
     }
 
     fn load_sessions(&self) -> Result<ParakeetSessions> {
@@ -504,5 +564,28 @@ mod tests {
         assert_eq!(bootstrap.input_states_1.shape(), &[2, 2, 640]);
         assert_eq!(bootstrap.input_states_2.shape(), &[2, 2, 640]);
         assert_eq!(vocabulary.blank_token_id(), 3);
+    }
+
+    #[test]
+    fn manager_runs_dummy_frontend_pass() {
+        let spec = ParakeetModelSpec::resolve("nemo-parakeet-tdt-0.6b-v3", Some("int8")).unwrap();
+        let model_dir = PathBuf::from(
+            r"E:\development\chirp\chirp-rust\assets\models\nemo-parakeet-tdt-0.6b-v3-int8",
+        );
+
+        if !spec.is_prepared(&model_dir) {
+            return;
+        }
+
+        let mut manager =
+            ParakeetManager::new(model_dir, spec, Some(Duration::from_secs(300))).unwrap();
+        let summary = manager.run_frontend_dummy(1600).unwrap();
+        assert_eq!(summary.waveform_shape, vec![1, 1600]);
+        assert_eq!(summary.feature_shape[0], 1);
+        assert_eq!(summary.feature_shape[1], 128);
+        assert_eq!(summary.encoder_shape[0], 1);
+        assert_eq!(summary.encoder_shape[1], 1024);
+        assert_eq!(summary.feature_lengths.len(), 1);
+        assert_eq!(summary.encoder_lengths.len(), 1);
     }
 }
