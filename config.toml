@@ -1,0 +1,24 @@
+primary_shortcut = "ctrl+shift"
+stt_backend = "parakeet"
+parakeet_model = "nemo-parakeet-tdt-0.6b-v3"
+parakeet_quantization = "int8"
+onnx_providers = "cpu"
+threads = 0
+language = "en"
+post_processing = ""
+injection_mode = "type"
+paste_mode = "ctrl"
+clipboard_behavior = true
+clipboard_clear_delay = 0.75
+model_timeout = 300.0
+audio_feedback = true
+audio_feedback_volume = 0.25
+recording_overlay = true
+start_sound_path = ""
+stop_sound_path = ""
+error_sound_path = ""
+max_recording_duration = 45.0
+
+[word_overrides]
+parrakeat = "parakeet"
+"parra keat" = "parakeet"
