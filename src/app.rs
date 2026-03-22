@@ -3,6 +3,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use tracing::{error, info};
 
 use crate::audio::AudioBuffer;
 use crate::audio_feedback::AudioFeedback;
@@ -64,7 +65,7 @@ impl ChirpApp {
     }
 
     pub fn run(&self) -> Result<()> {
-        println!(
+        info!(
             "Chirp ready. Toggle recording with {}",
             self.config.primary_shortcut
         );
@@ -99,7 +100,7 @@ impl ChirpApp {
                     if let Ok(overlay) = self.overlay.lock() {
                         overlay.show("transcribing");
                     }
-                    println!("Recording started");
+                    info!("Recording started");
                 }
                 Err(error) => {
                     drop(state);
@@ -118,7 +119,7 @@ impl ChirpApp {
             self.audio_feedback
                 .play_stop(self.config.stop_sound_path.as_deref());
             self.spawn_transcription(recording);
-            println!("Recording stopped");
+            info!("Recording stopped");
         }
 
         Ok(())
@@ -148,7 +149,7 @@ impl ChirpApp {
             let recording = match recording.stop() {
                 Ok(value) => value,
                 Err(error) => {
-                    eprintln!("error: failed to stop recording: {error:#}");
+                    error!("failed to stop recording: {error:#}");
                     audio_feedback.play_error(config.error_sound_path.as_deref());
                     return;
                 }
@@ -164,13 +165,13 @@ impl ChirpApp {
                 Ok(text) => {
                     if !text.trim().is_empty() {
                         if let Err(error) = injector.inject(&text) {
-                            eprintln!("error: text injection failed: {error:#}");
+                            error!("text injection failed: {error:#}");
                             audio_feedback.play_error(config.error_sound_path.as_deref());
                         }
                     }
                 }
                 Err(error) => {
-                    eprintln!("error: transcription failed: {error:#}");
+                    error!("transcription failed: {error:#}");
                     audio_feedback.play_error(config.error_sound_path.as_deref());
                 }
             }
@@ -199,7 +200,7 @@ impl ChirpApp {
     }
 
     fn handle_timeout(&self) -> Result<()> {
-        println!("Maximum recording duration reached.");
+        info!("Maximum recording duration reached.");
         self.toggle_recording()
     }
 }
