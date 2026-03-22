@@ -138,6 +138,7 @@ impl ChirpApp {
             let injector = TextInjector::new(
                 keyboard,
                 processor,
+                &config.primary_shortcut,
                 &config.injection_mode,
                 &config.paste_mode,
                 config.clipboard_behavior,

@@ -5,6 +5,7 @@ use chirp_rust::cli::{Cli, Command};
 use chirp_rust::config::{ChirpConfig, ProjectPaths};
 use chirp_rust::dev::run_dev;
 use chirp_rust::recording::{ActiveRecording, MicrophoneRecorder};
+use chirp_rust::singleton::acquire_named_mutex;
 use chirp_rust::stt::parakeet::ParakeetModelSpec;
 use chirp_rust::text_processing::TextProcessor;
 use clap::Parser;
@@ -13,6 +14,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
+
+const APP_MUTEX_NAME: &str = "Local\\ChirpRustAppSingleton";
 
 fn main() {
     if let Err(error) = run() {
@@ -126,6 +129,10 @@ fn run() -> Result<()> {
         }
         Command::Run => {
             chirp_rust::recording_overlay::enable_dpi_awareness();
+            let _app_mutex = acquire_named_mutex(
+                APP_MUTEX_NAME,
+                "chirp-rust: another app instance is already active",
+            )?;
             let app = ChirpApp::new(paths.clone())?;
             app.run()?;
         }

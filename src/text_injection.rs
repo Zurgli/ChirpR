@@ -8,9 +8,17 @@ use arboard::Clipboard;
 use crate::keyboard::KeyboardController;
 use crate::text_processing::TextProcessor;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ClipboardSnapshot {
+    Text(String),
+    Empty,
+    Unavailable,
+}
+
 pub struct TextInjector {
     keyboard: Arc<KeyboardController>,
     processor: TextProcessor,
+    primary_shortcut: String,
     injection_mode: String,
     paste_mode: String,
     clipboard_behavior: bool,
@@ -21,6 +29,7 @@ impl TextInjector {
     pub fn new(
         keyboard: Arc<KeyboardController>,
         processor: TextProcessor,
+        primary_shortcut: &str,
         injection_mode: &str,
         paste_mode: &str,
         clipboard_behavior: bool,
@@ -29,6 +38,7 @@ impl TextInjector {
         Self {
             keyboard,
             processor,
+            primary_shortcut: primary_shortcut.to_string(),
             injection_mode: injection_mode.to_string(),
             paste_mode: paste_mode.to_string(),
             clipboard_behavior,
@@ -46,10 +56,14 @@ impl TextInjector {
             return Ok(processed);
         }
 
-        // The recording hotkey uses modifiers, so clear any keys the user
-        // may still be holding before we inject text or paste shortcuts.
+        // Clear synthetic modifiers first, then wait for the configured
+        // recording shortcut itself to be physically released. Without this,
+        // fast transcriptions can leak Ctrl/Shift/Space into the first
+        // injected characters or accidentally trigger app shortcuts.
         self.keyboard.release_modifiers()?;
-        thread::sleep(Duration::from_millis(40));
+        self.keyboard
+            .wait_for_shortcut_release(&self.primary_shortcut, Duration::from_millis(750))?;
+        thread::sleep(Duration::from_millis(30));
 
         if cfg!(target_os = "windows") && self.injection_mode == "type" {
             thread::sleep(Duration::from_millis(120));
@@ -58,6 +72,11 @@ impl TextInjector {
         }
 
         let mut clipboard = Clipboard::new().context("failed to open clipboard")?;
+        let previous_clipboard = if self.clipboard_behavior {
+            snapshot_clipboard_text(&mut clipboard)
+        } else {
+            ClipboardSnapshot::Unavailable
+        };
         clipboard
             .set_text(processed.clone())
             .context("failed to write text to clipboard")?;
@@ -71,18 +90,39 @@ impl TextInjector {
         self.keyboard.send(combo)?;
 
         if self.clipboard_behavior {
-            self.schedule_clipboard_clear();
+            self.schedule_clipboard_restore(previous_clipboard, processed.clone());
         }
 
         Ok(processed)
     }
 
-    fn schedule_clipboard_clear(&self) {
+    fn schedule_clipboard_restore(
+        &self,
+        previous_clipboard: ClipboardSnapshot,
+        injected_text: String,
+    ) {
         let delay = self.clipboard_clear_delay;
         thread::spawn(move || {
             thread::sleep(delay);
             if let Ok(mut clipboard) = Clipboard::new() {
-                let _ = clipboard.set_text("");
+                let current_text = clipboard.get_text().ok();
+                if current_text.as_deref() != Some(injected_text.as_str()) {
+                    return;
+                }
+
+                match previous_clipboard {
+                    // Restore the previous clipboard text when our injected paste
+                    // is still the current clipboard contents.
+                    ClipboardSnapshot::Text(previous) => {
+                        let _ = clipboard.set_text(previous);
+                    }
+                    ClipboardSnapshot::Empty => {
+                        let _ = clipboard.set_text("");
+                    }
+                    ClipboardSnapshot::Unavailable => {
+                        let _ = clipboard.set_text("");
+                    }
+                }
             }
         });
     }
@@ -91,6 +131,14 @@ impl TextInjector {
         post_processing: &str,
     ) -> TextProcessor {
         TextProcessor::new(word_overrides, post_processing)
+    }
+}
+
+fn snapshot_clipboard_text(clipboard: &mut Clipboard) -> ClipboardSnapshot {
+    match clipboard.get_text() {
+        Ok(text) if text.is_empty() => ClipboardSnapshot::Empty,
+        Ok(text) => ClipboardSnapshot::Text(text),
+        Err(_) => ClipboardSnapshot::Unavailable,
     }
 }
 

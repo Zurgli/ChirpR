@@ -103,6 +103,8 @@ impl TextProcessor {
     }
 
     pub fn process(&self, text: &str) -> String {
+        // Sanitize input before applying overrides so control characters cannot
+        // leak into the injection path.
         let sanitized = sanitize(text, true);
         if sanitized.is_empty() {
             return sanitized;
@@ -111,6 +113,8 @@ impl TextProcessor {
         let overridden = self.apply_word_overrides(&sanitized);
         let normalized = normalize_punctuation(&overridden);
         let styled = self.style.apply(&normalized);
+        // Final sanitization prevents overrides or style directives from
+        // reintroducing unsafe characters after processing.
         sanitize(&styled, false)
     }
 

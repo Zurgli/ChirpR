@@ -7,6 +7,7 @@ pub mod dev;
 pub mod keyboard;
 pub mod recording;
 pub mod recording_overlay;
+pub mod singleton;
 pub mod stt;
 pub mod text_injection;
 pub mod text_processing;

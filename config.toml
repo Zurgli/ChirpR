@@ -1,24 +1,25 @@
-primary_shortcut = "ctrl+shift+space"
-stt_backend = "parakeet"
-parakeet_model = "nemo-parakeet-tdt-0.6b-v3"
-parakeet_quantization = "int8"
-onnx_providers = "cpu"
-threads = 0
-language = "en"
-post_processing = ""
-injection_mode = "type"
-paste_mode = "ctrl"
-clipboard_behavior = true
-clipboard_clear_delay = 0.75
-model_timeout = 300.0
-audio_feedback = true
-audio_feedback_volume = 0.25
-recording_overlay = true
-start_sound_path = ""
-stop_sound_path = ""
-error_sound_path = ""
-max_recording_duration = 45.0
+primary_shortcut = "ctrl+shift+space"         # Hotkey that toggles recording; any supported combination works (for example "ctrl+shift+space").
+stt_backend = "parakeet"                      # Only "parakeet" is implemented today, but keeping this key leaves room for future backends.
+parakeet_model = "nemo-parakeet-tdt-0.6b-v3"  # ONNX bundle name; keep as-is unless new packaged models are added.
+parakeet_quantization = "int8"                # Set to "int8" to use the quantized model variant; leave blank for the default model.
+onnx_providers = "cpu"                        # Runtime provider key. Today the Rust app is CPU-first.
+threads = 0                                   # 0 (or empty) lets ONNX decide; set a positive integer to pin thread usage.
+language = "en"                               # Optional ISO language code; leave blank to let Parakeet auto-detect.
+post_processing = ""                          # StyleGuide prompt, such as "sentence case", "prepend: >>", or "append: dictated".
+injection_mode = "paste"                      # Recommended default. "paste" uses the clipboard and paste shortcut; "type" keeps the Windows SendInput path available.
+paste_mode = "ctrl"                           # Paste shortcut when clipboard injection is used: "ctrl" -> Ctrl+V, "ctrl+shift" -> Ctrl+Shift+V.
+clipboard_behavior = true                     # Restores previous clipboard text after paste when possible; otherwise clears the injected clipboard text after `clipboard_clear_delay`.
+clipboard_clear_delay = 0.75                  # Seconds to wait before restoring or clearing the clipboard after paste injection.
+model_timeout = 300.0                         # Unload model sessions after this many idle seconds; set 0 to keep them loaded.
+audio_feedback = true                         # Enables start/stop chime playback and error feedback.
+audio_feedback_volume = 0.25                  # Volume for fallback WAV playback as a fraction of full scale (0.0 to 1.0).
+recording_overlay = true                      # Enables the always-on-top recording overlay window.
+start_sound_path = ""                         # Leave blank to use the bundled start chirp in assets/sounds/ping-up.wav.
+stop_sound_path = ""                          # Leave blank to use the bundled stop chirp in assets/sounds/ping-down.wav.
+error_sound_path = ""                         # Leave blank to use the default system error beep.
+max_recording_duration = 45.0                 # Automatically stop recording after this many seconds (default: 45s).
 
+# Word overrides map spoken tokens (case-insensitive) to replacement text.
 [word_overrides]
 parrakeat = "parakeet"
 "parra keat" = "parakeet"

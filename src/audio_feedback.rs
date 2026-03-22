@@ -120,9 +120,15 @@ fn spawn_playback(audio: AudioBuffer, volume: f32) -> anyhow::Result<()> {
         .collect::<Vec<f32>>();
 
     let stream = match supported_config.sample_format() {
-        cpal::SampleFormat::F32 => build_output_stream::<f32>(&device, &stream_config, channels, scaled_samples)?,
-        cpal::SampleFormat::I16 => build_output_stream::<i16>(&device, &stream_config, channels, scaled_samples)?,
-        cpal::SampleFormat::U16 => build_output_stream::<u16>(&device, &stream_config, channels, scaled_samples)?,
+        cpal::SampleFormat::F32 => {
+            build_output_stream::<f32>(&device, &stream_config, channels, scaled_samples)?
+        }
+        cpal::SampleFormat::I16 => {
+            build_output_stream::<i16>(&device, &stream_config, channels, scaled_samples)?
+        }
+        cpal::SampleFormat::U16 => {
+            build_output_stream::<u16>(&device, &stream_config, channels, scaled_samples)?
+        }
         sample_format => {
             return Err(anyhow::anyhow!(
                 "unsupported output sample format: {sample_format:?}"
@@ -134,11 +140,7 @@ fn spawn_playback(audio: AudioBuffer, volume: f32) -> anyhow::Result<()> {
         let _keep_stream_alive = stream;
         let total_frames = frame_count as f32;
         let rate = stream_config.sample_rate.0 as f32;
-        let playback_seconds = if rate > 0.0 {
-            total_frames / rate
-        } else {
-            0.0
-        };
+        let playback_seconds = if rate > 0.0 { total_frames / rate } else { 0.0 };
         thread::sleep(Duration::from_secs_f32(playback_seconds + 0.05));
     });
 
