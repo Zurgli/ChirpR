@@ -46,6 +46,11 @@ impl TextInjector {
             return Ok(processed);
         }
 
+        // The recording hotkey uses modifiers, so clear any keys the user
+        // may still be holding before we inject text or paste shortcuts.
+        self.keyboard.release_modifiers()?;
+        thread::sleep(Duration::from_millis(40));
+
         if cfg!(target_os = "windows") && self.injection_mode == "type" {
             thread::sleep(Duration::from_millis(120));
             self.keyboard.write(&processed)?;

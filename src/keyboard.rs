@@ -70,6 +70,21 @@ impl KeyboardController {
             .text(text)
             .context("failed to type text into active window")
     }
+
+    pub fn release_modifiers(&self) -> Result<()> {
+        let mut enigo = self
+            .enigo
+            .lock()
+            .map_err(|_| anyhow::anyhow!("keyboard automation lock poisoned"))?;
+
+        for key in [Key::Shift, Key::Control, Key::Alt, Key::Meta] {
+            enigo
+                .key(key, Direction::Release)
+                .context("failed to release keyboard modifier")?;
+        }
+
+        Ok(())
+    }
 }
 
 impl KeyboardShortcutListener {
