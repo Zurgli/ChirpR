@@ -42,16 +42,44 @@ impl AudioBuffer {
         })
     }
 
-    pub fn require_sample_rate(&self, expected_hz: u32) -> Result<()> {
-        if self.sample_rate_hz == expected_hz {
-            Ok(())
-        } else {
-            bail!(
-                "expected {} Hz audio but got {} Hz",
-                expected_hz,
-                self.sample_rate_hz
-            )
+    pub fn resample_to(&self, target_hz: u32) -> Result<Self> {
+        if target_hz == 0 {
+            bail!("target sample rate must be greater than zero");
         }
+
+        if self.sample_rate_hz == target_hz {
+            return Ok(self.clone());
+        }
+
+        if self.mono_samples.is_empty() {
+            return Ok(Self {
+                sample_rate_hz: target_hz,
+                channels: self.channels,
+                mono_samples: Vec::new(),
+            });
+        }
+
+        let source_len = self.mono_samples.len();
+        let target_len =
+            ((source_len as u64 * target_hz as u64) / self.sample_rate_hz as u64).max(1) as usize;
+        let ratio = self.sample_rate_hz as f64 / target_hz as f64;
+        let mut resampled = Vec::with_capacity(target_len);
+
+        for index in 0..target_len {
+            let source_position = index as f64 * ratio;
+            let left = source_position.floor() as usize;
+            let right = (left + 1).min(source_len - 1);
+            let weight = (source_position - left as f64) as f32;
+            let left_sample = self.mono_samples[left];
+            let right_sample = self.mono_samples[right];
+            resampled.push(left_sample * (1.0 - weight) + right_sample * weight);
+        }
+
+        Ok(Self {
+            sample_rate_hz: target_hz,
+            channels: self.channels,
+            mono_samples: resampled,
+        })
     }
 }
 
@@ -151,8 +179,21 @@ mod tests {
             mono_samples: vec![0.0, 1.0],
         };
 
-        let error = audio.require_sample_rate(16_000).unwrap_err().to_string();
-        assert!(error.contains("expected 16000 Hz audio"));
+        let resampled = audio.resample_to(16_000).unwrap();
+        assert_eq!(resampled.sample_rate_hz, 16_000);
+        assert!(!resampled.mono_samples.is_empty());
+    }
+
+    #[test]
+    fn resample_rejects_zero_rate() {
+        let audio = AudioBuffer {
+            sample_rate_hz: 16_000,
+            channels: 1,
+            mono_samples: vec![0.0, 1.0],
+        };
+
+        let error = audio.resample_to(0).unwrap_err().to_string();
+        assert!(error.contains("target sample rate must be greater than zero"));
     }
 
     fn temp_wav_path(label: &str) -> std::path::PathBuf {

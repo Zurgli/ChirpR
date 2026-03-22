@@ -126,8 +126,8 @@ fn run() -> Result<()> {
                 &config.parakeet_model,
                 config.parakeet_quantization.as_deref(),
             )?;
-            let audio = AudioBuffer::load_wav(&wav)?;
-            audio.require_sample_rate(16_000)?;
+            let source_audio = AudioBuffer::load_wav(&wav)?;
+            let audio = source_audio.resample_to(16_000)?;
 
             let mut manager = spec.create_manager(&model_dir)?;
             let decode = manager.greedy_decode_waveform(&audio.mono_samples, 10)?;
@@ -137,9 +137,10 @@ fn run() -> Result<()> {
 
             if cli.verbose {
                 println!(
-                    "audio: sample_rate_hz={} channels={} mono_samples={}",
+                    "audio: source_rate_hz={} runtime_rate_hz={} channels={} mono_samples={}",
+                    source_audio.sample_rate_hz,
                     audio.sample_rate_hz,
-                    audio.channels,
+                    source_audio.channels,
                     audio.mono_samples.len(),
                 );
                 println!(
