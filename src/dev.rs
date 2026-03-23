@@ -171,9 +171,9 @@ fn build_app_binary(project_root: &Path) -> Result<PathBuf> {
     }
 
     let exe_name = if cfg!(target_os = "windows") {
-        "chirp-rust.exe"
+        "chirpr-cli.exe"
     } else {
-        "chirp-rust"
+        "chirpr-cli"
     };
     Ok(project_root.join("target").join("debug").join(exe_name))
 }

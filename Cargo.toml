@@ -1,7 +1,18 @@
 [package]
-name = "chirp-rust"
+name = "chirpr"
 version = "0.1.0"
 edition = "2024"
+
+[lib]
+name = "chirp_rust"
+
+[[bin]]
+name = "chirpr-cli"
+path = "src/main.rs"
+
+[[bin]]
+name = "chirpr"
+path = "src/bin/chirpr.rs"
 
 [dependencies]
 anyhow = "1.0"

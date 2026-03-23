@@ -4,9 +4,9 @@ use clap::{Parser, Subcommand};
 
 #[derive(Debug, Clone, Parser)]
 #[command(
-    name = "chirp-rust",
+    name = "chirpr-cli",
     version,
-    about = "Rust migration of Chirp local dictation"
+    about = "CLI for ChirpR local dictation"
 )]
 pub struct Cli {
     #[arg(short, long, global = true)]

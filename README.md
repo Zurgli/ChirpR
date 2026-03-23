@@ -1,6 +1,6 @@
-# Chirp Rust
+# ChirpR
 
-Chirp Rust is the Windows-native Rust port of the original Chirp dictation app.
+ChirpR is the Windows-native Rust port of the original Chirp dictation app.
 
 The original Python implementation came from the upstream `Whamp/chirp` project. This repository is the Rust-based implementation of that app's behavior and workflow.
 
@@ -39,12 +39,13 @@ Build and stage a Windows release bundle:
 
 That produces:
 
-- `dist\chirp-rust-windows-x64\chirp-rust.exe`
-- `dist\chirp-rust-windows-x64\config.toml`
-- `dist\chirp-rust-windows-x64\assets\sounds\`
-- `dist\chirp-rust-windows-x64\run-portable.cmd`
-- `dist\chirp-rust-windows-x64\ChirpRSetup.msi`
-- `dist\chirp-rust-windows-x64\install.cmd`
+- `dist\chirpr-windows-x64\chirpr-cli.exe`
+- `dist\chirpr-windows-x64\chirpr.exe`
+- `dist\chirpr-windows-x64\config.toml`
+- `dist\chirpr-windows-x64\assets\sounds\`
+- `dist\chirpr-windows-x64\run-portable.cmd`
+- `dist\chirpr-windows-x64\ChirpRSetup.msi`
+- `dist\chirpr-windows-x64\install.cmd`
 
 Portable launch downloads models on first run if they are missing.
 The MSI bundles the configured int8 Parakeet model so installed use does not need a separate setup step.

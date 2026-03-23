@@ -2,3 +2,5 @@
 /.context
 /assets/models
 /dist
+/installer/bin
+/installer/obj

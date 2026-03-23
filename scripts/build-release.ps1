@@ -9,14 +9,14 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $releaseRoot = Join-Path $repoRoot $OutputRoot
-$bundleRoot = Join-Path $releaseRoot "chirp-rust-windows-x64"
+$bundleRoot = Join-Path $releaseRoot "chirpr-windows-x64"
 $assetsSource = Join-Path $repoRoot "assets"
 $soundsSource = Join-Path $assetsSource "sounds"
 $modelsSource = Join-Path $assetsSource "models\nemo-parakeet-tdt-0.6b-v3-int8"
-$binarySource = Join-Path $repoRoot "target\$TargetTriple\release\chirp-rust.exe"
+$binarySource = Join-Path $repoRoot "target\$TargetTriple\release\chirpr-cli.exe"
 $launcherSource = Join-Path $repoRoot "target\$TargetTriple\release\chirpr.exe"
 $cargoToml = Join-Path $repoRoot "Cargo.toml"
-$installerProject = Join-Path $repoRoot "installer\ChirpRust.Installer.wixproj"
+$installerProject = Join-Path $repoRoot "installer\ChirpR.Installer.wixproj"
 $installerOutput = Join-Path $repoRoot "installer\bin\x64\Release\ChirpRSetup.msi"
 $licenseSource = Join-Path $repoRoot "installer\License.rtf"
 $uninstallCmdSource = Join-Path $repoRoot "installer\Uninstall.cmd"
@@ -95,7 +95,7 @@ Remove-Item -Recurse -Force $bundleRoot -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $bundleRoot | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $bundleRoot "assets") | Out-Null
 
-Copy-Item $binarySource (Join-Path $bundleRoot "chirp-rust.exe")
+Copy-Item $binarySource (Join-Path $bundleRoot "chirpr-cli.exe")
 Copy-Item $launcherSource (Join-Path $bundleRoot "chirpr.exe")
 Copy-Item (Join-Path $repoRoot "config.toml") (Join-Path $bundleRoot "config.toml")
 Copy-Item (Join-Path $repoRoot "LICENSE") (Join-Path $bundleRoot "LICENSE")
@@ -110,12 +110,12 @@ if (Test-Path $soundsSource) {
 @"
 @echo off
 pushd "%~dp0"
-".\chirp-rust.exe" setup
+".\chirpr-cli.exe" setup
 if errorlevel 1 (
   popd
   exit /b %errorlevel%
 )
-".\chirp-rust.exe" run
+".\chirpr-cli.exe" run
 popd
 "@ | Set-Content (Join-Path $bundleRoot "run-portable.cmd")
 
@@ -265,7 +265,7 @@ $appRoot
 ChirpR release bundle
 
 Contents:
-- chirp-rust.exe
+- chirpr-cli.exe
 - chirpr.exe
 - config.toml
 - LICENSE
