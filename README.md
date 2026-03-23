@@ -43,10 +43,11 @@ That produces:
 - `dist\chirp-rust-windows-x64\config.toml`
 - `dist\chirp-rust-windows-x64\assets\sounds\`
 - `dist\chirp-rust-windows-x64\run-portable.cmd`
+- `dist\chirp-rust-windows-x64\ChirpRSetup.msi`
 - `dist\chirp-rust-windows-x64\install.cmd`
-- `dist\chirp-rust-windows-x64\uninstall.cmd`
 
-Models are not bundled.
+Portable launch downloads models on first run if they are missing.
+The MSI bundles the configured int8 Parakeet model so installed use does not need a separate setup step.
 
 Portable use:
 
@@ -60,9 +61,18 @@ Installed use:
 .\install.cmd
 ```
 
-The installer prompts for:
+You can also open `.\ChirpRSetup.msi` directly.
 
-- portable vs installed use
+The installer flow prompts for:
+
 - install directory
 - whether to enable Windows login startup
-- whether to launch immediately after setup
+- whether to launch immediately after install
+
+The installed app also creates Start menu shortcuts for:
+
+- `ChirpR`
+- `ChirpR Settings`
+- `Uninstall ChirpR`
+
+Uninstall the MSI-installed app from Windows Settings > Installed apps.

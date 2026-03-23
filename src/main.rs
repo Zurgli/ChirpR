@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chirp_rust::app::{ChirpApp, transcribe_capture};
+use chirp_rust::app::transcribe_capture;
 use chirp_rust::audio::AudioBuffer;
 use chirp_rust::autostart::{self, AutostartAction};
 use chirp_rust::cli::{AutostartCliAction, Cli, Command};
@@ -7,7 +7,6 @@ use chirp_rust::config::{ChirpConfig, ProjectPaths};
 use chirp_rust::dev::run_dev;
 use chirp_rust::logger;
 use chirp_rust::recording::{ActiveRecording, MicrophoneRecorder};
-use chirp_rust::singleton::acquire_named_mutex;
 use chirp_rust::stt::parakeet::ParakeetModelSpec;
 use chirp_rust::text_processing::TextProcessor;
 use clap::Parser;
@@ -17,8 +16,6 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 use tracing::{debug, error, info};
-
-const APP_MUTEX_NAME: &str = "Local\\ChirpRustAppSingleton";
 
 fn main() {
     if let Err(error) = run() {
@@ -69,7 +66,12 @@ fn run() -> Result<()> {
             println!("model dir: {}", model_dir.display());
             if missing_files.is_empty() {
                 println!("model files: ready");
-                let manager = spec.create_manager(&model_dir)?;
+                let timeout = if config.model_timeout > 0.0 {
+                    Some(Duration::from_secs_f32(config.model_timeout))
+                } else {
+                    None
+                };
+                let manager = spec.create_manager(&model_dir, timeout)?;
                 println!("onnx sessions: ready");
                 if cli.verbose {
                     let bundle = manager.load_bundle()?;
@@ -132,13 +134,7 @@ fn run() -> Result<()> {
             }
         }
         Command::Run => {
-            chirp_rust::recording_overlay::enable_dpi_awareness();
-            let _app_mutex = acquire_named_mutex(
-                APP_MUTEX_NAME,
-                "chirp-rust: another app instance is already active",
-            )?;
-            let app = ChirpApp::new(paths.clone())?;
-            app.run()?;
+            chirp_rust::run_background_app(paths.clone())?;
         }
         Command::Autostart { action } => {
             let exe = std::env::current_exe()?;

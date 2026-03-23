@@ -188,11 +188,15 @@ impl ParakeetModelSpec {
         Ok(materialized)
     }
 
-    pub fn create_manager(&self, model_dir: &Path) -> Result<ParakeetManager> {
+    pub fn create_manager(
+        &self,
+        model_dir: &Path,
+        timeout: Option<Duration>,
+    ) -> Result<ParakeetManager> {
         ParakeetManager::new(
             model_dir.to_path_buf(),
             self.clone(),
-            Some(Duration::from_secs(300)),
+            timeout,
         )
     }
 

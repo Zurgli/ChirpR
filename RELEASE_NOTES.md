@@ -15,8 +15,8 @@
 
 - Added `chirp-rust dev` for automatic restart during development.
 - Added a Windows release staging script at `scripts/build-release.ps1`.
-- Added bundled install and uninstall scripts for Windows local-user deployment.
-- Added a portable `run-portable.cmd` entrypoint and an interactive installer flow.
+- Added a portable `run-portable.cmd` entrypoint with automatic setup on first launch.
+- Added a proper per-user Windows MSI installer plus an `install.cmd` wrapper for install directory, autostart, and launch options.
 
 ### Configuration
 

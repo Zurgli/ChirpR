@@ -1,0 +1,28 @@
+<Project Sdk="WixToolset.Sdk/6.0.2">
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <Platform>x64</Platform>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <TargetName>ChirpRSetup</TargetName>
+    <DefineConstants>
+      ProductVersion=$(ProductVersion);
+      BinarySource=$(BinarySource);
+      LauncherSource=$(LauncherSource);
+      ConfigSource=$(ConfigSource);
+      LicenseSource=$(LicenseSource);
+      UninstallCmdSource=$(UninstallCmdSource);
+      UninstallScriptSource=$(UninstallScriptSource);
+      PingUpSource=$(PingUpSource);
+      PingDownSource=$(PingDownSource);
+      ModelConfigSource=$(ModelConfigSource);
+      ModelDecoderSource=$(ModelDecoderSource);
+      ModelEncoderSource=$(ModelEncoderSource);
+      ModelFeatureSource=$(ModelFeatureSource);
+      ModelVocabSource=$(ModelVocabSource)
+    </DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" Version="6.0.2" />
+  </ItemGroup>
+</Project>

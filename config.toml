@@ -10,7 +10,7 @@ injection_mode = "paste"                      # Recommended default. "paste" use
 paste_mode = "ctrl"                           # Paste shortcut when clipboard injection is used: "ctrl" -> Ctrl+V, "ctrl+shift" -> Ctrl+Shift+V.
 clipboard_behavior = true                     # Restores previous clipboard text after paste when possible; otherwise clears the injected clipboard text after `clipboard_clear_delay`.
 clipboard_clear_delay = 0.75                  # Seconds to wait before restoring or clearing the clipboard after paste injection.
-model_timeout = 300.0                         # Unload model sessions after this many idle seconds; set 0 to keep them loaded.
+model_timeout = 10.0                          # Unload model sessions after this many idle seconds; set 0 to keep them loaded.
 audio_feedback = true                         # Enables start/stop chime playback and error feedback.
 audio_feedback_volume = 0.25                  # Volume for fallback WAV playback as a fraction of full scale (0.0 to 1.0).
 recording_overlay = true                      # Enables the always-on-top recording overlay window.
@@ -21,5 +21,7 @@ max_recording_duration = 45.0                 # Automatically stop recording aft
 
 # Word overrides map spoken tokens (case-insensitive) to replacement text.
 [word_overrides]
+um = ""
+uh = ""
 parrakeat = "parakeet"
 "parra keat" = "parakeet"

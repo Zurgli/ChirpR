@@ -3,7 +3,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::audio::AudioBuffer;
 use crate::audio_feedback::AudioFeedback;
@@ -14,6 +14,8 @@ use crate::recording_overlay::RecordingOverlay;
 use crate::stt::parakeet::{ParakeetManager, ParakeetModelSpec};
 use crate::text_injection::TextInjector;
 use crate::text_processing::TextProcessor;
+
+const HOUSEKEEPING_INTERVAL: Duration = Duration::from_secs(1);
 
 struct AppState {
     active_recording: Option<ActiveRecording>,
@@ -44,7 +46,14 @@ impl ChirpApp {
         )?;
         let keyboard = Arc::new(KeyboardController::new()?);
         let shortcut_listener = KeyboardShortcutListener::register(&config.primary_shortcut)?;
-        let parakeet = Arc::new(Mutex::new(spec.create_manager(&model_dir)?));
+        let manager_timeout = if config.model_timeout > 0.0 {
+            Some(Duration::from_secs_f32(config.model_timeout))
+        } else {
+            None
+        };
+        let parakeet = Arc::new(Mutex::new(
+            spec.create_manager(&model_dir, manager_timeout)?,
+        ));
         Ok(Self {
             audio_feedback: AudioFeedback::new(
                 config.audio_feedback,
@@ -72,15 +81,27 @@ impl ChirpApp {
 
         loop {
             if let Some(timeout) = self.recording_timeout_remaining()? {
-                match self.shortcut_listener.recv_timeout(timeout)? {
+                match self.shortcut_listener.recv_timeout(timeout.min(HOUSEKEEPING_INTERVAL))? {
                     Some(()) => self.toggle_recording()?,
-                    None => self.handle_timeout()?,
+                    None if timeout <= HOUSEKEEPING_INTERVAL => self.handle_timeout()?,
+                    None => self.run_housekeeping()?,
                 }
             } else {
-                self.shortcut_listener.recv()?;
-                self.toggle_recording()?;
+                match self.shortcut_listener.recv_timeout(HOUSEKEEPING_INTERVAL)? {
+                    Some(()) => self.toggle_recording()?,
+                    None => self.run_housekeeping()?,
+                }
             }
         }
+    }
+
+    fn run_housekeeping(&self) -> Result<()> {
+        let mut manager = self
+            .parakeet
+            .lock()
+            .map_err(|_| anyhow::anyhow!("parakeet manager lock poisoned"))?;
+        manager.maybe_unload();
+        Ok(())
     }
 
     fn toggle_recording(&self) -> Result<()> {
@@ -95,6 +116,7 @@ impl ChirpApp {
                     state.active_recording = Some(recording);
                     state.recording_started_at = Some(Instant::now());
                     drop(state);
+                    self.spawn_model_prewarm();
                     self.audio_feedback
                         .play_start(self.config.start_sound_path.as_deref());
                     if let Ok(overlay) = self.overlay.lock() {
@@ -123,6 +145,28 @@ impl ChirpApp {
         }
 
         Ok(())
+    }
+
+    fn spawn_model_prewarm(&self) {
+        let parakeet = Arc::clone(&self.parakeet);
+        thread::spawn(move || {
+            let mut manager = match parakeet.lock() {
+                Ok(manager) => manager,
+                Err(_) => {
+                    error!("parakeet manager lock poisoned during prewarm");
+                    return;
+                }
+            };
+
+            if manager.is_loaded() {
+                return;
+            }
+
+            debug!("prewarming Parakeet model sessions");
+            if let Err(error) = manager.ensure_loaded() {
+                error!("failed to prewarm model: {error:#}");
+            }
+        });
     }
 
     fn spawn_transcription(&self, recording: ActiveRecording) {
@@ -232,7 +276,12 @@ pub fn transcribe_capture(
             &config.parakeet_model,
             config.parakeet_quantization.as_deref(),
         )?;
-        let mut manager = spec.create_manager(&model_dir)?;
+        let timeout = if config.model_timeout > 0.0 {
+            Some(Duration::from_secs_f32(config.model_timeout))
+        } else {
+            None
+        };
+        let mut manager = spec.create_manager(&model_dir, timeout)?;
         manager.greedy_decode_waveform(&audio.mono_samples, 10)?
     };
     Ok(decode.text)
