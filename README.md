@@ -1,16 +1,41 @@
 # ChirpR
 
-ChirpR is the Windows-native Rust port of the original Chirp dictation app.
+ChirpR is a Windows-native Rust dictation app built around local Parakeet ONNX transcription.
 
-The original Python implementation came from the upstream `Whamp/chirp` project. This repository is the Rust-based implementation of that app's behavior and workflow.
+It is a Rust implementation of the original upstream `Whamp/chirp` workflow and desktop UX, adapted for a Windows-first packaged experience.
 
-## Current status
+## Features
 
-- Local Parakeet transcription is working.
-- Global hotkey dictation flow is working.
-- Paste injection is the default because it is more reliable across Windows apps.
-- Typing injection remains available through `injection_mode = "type"` in `config.toml`.
-- Audio feedback, recording overlay, setup flow, and dev runner are implemented.
+- Local speech-to-text with Parakeet ONNX models
+- Global hotkey dictation with `Ctrl+Shift+Space`
+- Paste injection by default for better Windows app compatibility
+- Optional typed injection with `injection_mode = "type"`
+- Recording overlay with audio start/stop/error feedback
+- Idle model unload and background model prewarm
+- Portable and MSI-based Windows install flows
+- Optional current-user run-at-login support
+
+## Quick Start
+
+Portable bundle:
+
+```powershell
+.\run-portable.cmd
+```
+
+Installed bundle:
+
+```powershell
+.\install.cmd
+```
+
+Direct MSI install:
+
+```powershell
+.\ChirpRSetup.msi
+```
+
+After install or launch, use `Ctrl+Shift+Space` to start dictation.
 
 ## Development
 
@@ -29,7 +54,7 @@ Forward app args through the dev runner with a second `--`:
 cargo run -- dev -- --verbose
 ```
 
-## Release build
+## Release Build
 
 Build and stage a Windows release bundle:
 
@@ -37,43 +62,43 @@ Build and stage a Windows release bundle:
 .\scripts\build-release.ps1
 ```
 
-That produces:
+This produces:
 
 - `dist\chirpr-windows-x64\chirpr-cli.exe`
 - `dist\chirpr-windows-x64\chirpr.exe`
 - `dist\chirpr-windows-x64\config.toml`
+- `dist\chirpr-windows-x64\LICENSE`
 - `dist\chirpr-windows-x64\assets\sounds\`
 - `dist\chirpr-windows-x64\run-portable.cmd`
 - `dist\chirpr-windows-x64\ChirpRSetup.msi`
 - `dist\chirpr-windows-x64\install.cmd`
+- `dist\chirpr-windows-x64\uninstall.cmd`
 
-Portable launch downloads models on first run if they are missing.
+Portable launch runs setup on first use and downloads model files if they are missing.
 The MSI bundles the configured int8 Parakeet model so installed use does not need a separate setup step.
 
-Portable use:
+The installer flow supports:
 
-```powershell
-.\run-portable.cmd
-```
+- install directory selection
+- optional Windows login startup
+- optional immediate launch after install
 
-Installed use:
-
-```powershell
-.\install.cmd
-```
-
-You can also open `.\ChirpRSetup.msi` directly.
-
-The installer flow prompts for:
-
-- install directory
-- whether to enable Windows login startup
-- whether to launch immediately after install
-
-The installed app also creates Start menu shortcuts for:
+The installed app creates Start menu shortcuts for:
 
 - `ChirpR`
 - `ChirpR Settings`
 - `Uninstall ChirpR`
 
-Uninstall the MSI-installed app from Windows Settings > Installed apps.
+## Logging And Models
+
+Runtime logs currently go to `stderr`.
+
+Model files are stored under:
+
+- repo/dev use: `assets\models\`
+- portable bundle: `.\assets\models\`
+- installed bundle: inside the MSI-installed app directory under `assets\models\`
+
+## License
+
+ChirpR is open source. See [LICENSE](/E:/development/chirp/chirp-rust/LICENSE).
