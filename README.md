@@ -12,7 +12,7 @@ It is a Rust implementation of the original upstream `Whamp/chirp` workflow and 
 - Optional typed injection with `injection_mode = "type"`
 - Recording overlay with audio start/stop/error feedback
 - Idle model unload and background model prewarm
-- Portable and MSI-based Windows install flows
+- NSIS-based Windows installer
 - Optional current-user run-at-login support
 
 ## Quick Start
@@ -23,16 +23,10 @@ Portable bundle:
 .\run-portable.cmd
 ```
 
-Installed bundle:
+Installed bundle (NSIS installer):
 
 ```powershell
-.\install.cmd
-```
-
-Direct MSI install:
-
-```powershell
-.\ChirpRSetup.msi
+.\ChirpRSetup.exe
 ```
 
 After install or launch, use `Ctrl+Shift+Space` to start dictation.
@@ -70,23 +64,21 @@ This produces:
 - `dist\chirpr-windows-x64\LICENSE`
 - `dist\chirpr-windows-x64\assets\sounds\`
 - `dist\chirpr-windows-x64\run-portable.cmd`
-- `dist\chirpr-windows-x64\ChirpRSetup.msi`
-- `dist\chirpr-windows-x64\install.cmd`
-- `dist\chirpr-windows-x64\uninstall.cmd`
+- `dist\chirpr-windows-x64\ChirpRSetup.exe`
+- `dist\chirpr-windows-x64\install.ps1`
+- `dist\chirpr-windows-x64\Uninstall.ps1`
 
 Portable launch runs setup on first use and downloads model files if they are missing.
-The MSI bundles the configured int8 Parakeet model so installed use does not need a separate setup step.
 
-The installer flow supports:
+The NSIS installer flow supports:
 
 - install directory selection
-- optional Windows login startup
-- optional immediate launch after install
+- automatically kills running instance before upgrade
+- launches app after installation completes
 
 The installed app creates Start menu shortcuts for:
 
 - `ChirpR`
-- `ChirpR Settings`
 - `Uninstall ChirpR`
 
 ## Logging And Models
