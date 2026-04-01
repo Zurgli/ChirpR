@@ -16,12 +16,13 @@ pub mod text_processing;
 
 use anyhow::Result;
 use config::ProjectPaths;
-use singleton::acquire_named_mutex;
+use singleton::{acquire_named_mutex, terminate_other_app_instances};
 
 const APP_MUTEX_NAME: &str = "Local\\ChirpRustAppSingleton";
 
 pub fn run_background_app(paths: ProjectPaths) -> Result<()> {
     recording_overlay::enable_dpi_awareness();
+    terminate_other_app_instances()?;
     let _app_mutex = acquire_named_mutex(
         APP_MUTEX_NAME,
         "chirp-rust: another app instance is already active",

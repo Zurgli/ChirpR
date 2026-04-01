@@ -12,6 +12,13 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - Updated README to reflect NSIS installer
 
+## [0.2.1] - 2026-03-31
+
+### Changed
+- Prevent model unload while recording or transcribing
+- Reset model idle timeout after transcription completes
+- Relaunching `chirpr.exe` now replaces older running ChirpR instances from the same install
+
 ## [0.1.0] - 2025-01-19
 
 ### Added
