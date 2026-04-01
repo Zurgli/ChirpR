@@ -39,7 +39,7 @@ const WM_APP_HIDE: u32 = WM_APP + 2;
 const WM_APP_CLOSE: u32 = WM_APP + 3;
 const WM_APP_SET_MODE: u32 = WM_APP + 4;
 const PULSE_TIMER_ID: usize = 1;
-const PULSE_INTERVAL_MS: u32 = 33;
+const PULSE_INTERVAL_MS: u32 = 140;
 const BASE_OVERLAY_WIDTH: i32 = 156;
 const BASE_OVERLAY_HEIGHT: i32 = 24;
 const BASE_TOP_MARGIN: i32 = 0;
@@ -256,7 +256,7 @@ unsafe extern "system" fn window_proc(
     match message {
         WM_APP_SET_MODE => {
             unsafe {
-                let _ = InvalidateRect(hwnd, ptr::null(), 1);
+                let _ = InvalidateRect(hwnd, ptr::null(), 0);
                 let _ = UpdateWindow(hwnd);
             }
             0
@@ -265,7 +265,7 @@ unsafe extern "system" fn window_proc(
             unsafe {
                 let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
                 let _ = SetTimer(hwnd, PULSE_TIMER_ID, PULSE_INTERVAL_MS, None);
-                let _ = InvalidateRect(hwnd, ptr::null(), 1);
+                let _ = InvalidateRect(hwnd, ptr::null(), 0);
                 let _ = UpdateWindow(hwnd);
             }
             0
@@ -296,7 +296,7 @@ unsafe extern "system" fn window_proc(
                     geometry.height,
                     SWP_NOACTIVATE | SWP_NOZORDER,
                 );
-                let _ = InvalidateRect(hwnd, ptr::null(), 1);
+                let _ = InvalidateRect(hwnd, ptr::null(), 0);
             }
             0
         }
@@ -310,7 +310,7 @@ unsafe extern "system" fn window_proc(
         WM_TIMER => {
             if w_param == PULSE_TIMER_ID {
                 unsafe {
-                    let _ = InvalidateRect(hwnd, ptr::null(), 1);
+                    let _ = InvalidateRect(hwnd, ptr::null(), 0);
                 }
                 0
             } else {
@@ -602,15 +602,15 @@ fn current_dot_metrics(metrics: &OverlayMetrics) -> DotRenderMetrics {
     };
 
     let elapsed = state.pulse_started_at.elapsed().as_secs_f32();
-    let wave = (elapsed * std::f32::consts::TAU * 1.4).sin();
-    let scale = 1.0 + 0.22 * ((wave + 1.0) * 0.5);
+    let wave = (elapsed * std::f32::consts::TAU * 0.75).sin();
+    let scale = 1.0 + 0.08 * ((wave + 1.0) * 0.5);
     let size = ((metrics.dot_size as f32) * scale).round() as i32;
     let size = size.max(metrics.dot_size);
     let offset = (size - metrics.dot_size) / 2;
-    let tint = ((wave + 1.0) * 0.5 * 28.0).round() as u8;
-    let red = 227_u8.saturating_add(tint);
-    let green = 48_u8.saturating_add(tint / 4);
-    let blue = 48_u8.saturating_add(tint / 4);
+    let tint = ((wave + 1.0) * 0.5 * 12.0).round() as u8;
+    let red = 243_u8.saturating_add(tint);
+    let green = 58_u8.saturating_add(tint / 6);
+    let blue = 48_u8.saturating_add(tint / 8);
 
     DotRenderMetrics {
         left: metrics.dot_left - offset,
