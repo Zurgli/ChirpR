@@ -3,7 +3,7 @@ use std::ptr;
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
@@ -27,17 +27,19 @@ use windows_sys::Win32::UI::HiDpi::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
-    GetClientRect, GetMessageW, GetSystemMetrics, MSG, PostMessageW, PostQuitMessage,
+    GetClientRect, GetMessageW, GetSystemMetrics, KillTimer, MSG, PostMessageW, PostQuitMessage,
     RegisterClassW, SM_CXSCREEN, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOZORDER,
-    SetProcessDPIAware, SetWindowPos, ShowWindow, TranslateMessage, WM_APP, WM_CLOSE, WM_DESTROY,
-    WM_DPICHANGED, WM_PAINT, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
-    WS_POPUP,
+    SetProcessDPIAware, SetTimer, SetWindowPos, ShowWindow, TranslateMessage, WM_APP, WM_CLOSE,
+    WM_DESTROY, WM_DPICHANGED, WM_PAINT, WM_TIMER, WNDCLASSW, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 const WM_APP_SHOW: u32 = WM_APP + 1;
 const WM_APP_HIDE: u32 = WM_APP + 2;
 const WM_APP_CLOSE: u32 = WM_APP + 3;
 const WM_APP_SET_MODE: u32 = WM_APP + 4;
+const PULSE_TIMER_ID: usize = 1;
+const PULSE_INTERVAL_MS: u32 = 33;
 const BASE_OVERLAY_WIDTH: i32 = 156;
 const BASE_OVERLAY_HEIGHT: i32 = 24;
 const BASE_TOP_MARGIN: i32 = 0;
@@ -62,6 +64,8 @@ pub struct OverlayGeometry {
 #[derive(Debug, Clone)]
 struct OverlayState {
     label: String,
+    visible: bool,
+    pulse_started_at: Instant,
 }
 
 pub struct RecordingOverlay {
@@ -78,6 +82,8 @@ impl RecordingOverlay {
                 hwnd: Arc::new(Mutex::new(0)),
                 state: Arc::new(Mutex::new(OverlayState {
                     label: "Transcribing".to_string(),
+                    visible: false,
+                    pulse_started_at: Instant::now(),
                 })),
             };
         }
@@ -85,6 +91,8 @@ impl RecordingOverlay {
         let hwnd = Arc::new(Mutex::new(0_isize));
         let state = Arc::new(Mutex::new(OverlayState {
             label: "Transcribing".to_string(),
+            visible: false,
+            pulse_started_at: Instant::now(),
         }));
         let _ = OVERLAY_STATE.set(Arc::clone(&state));
         let ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -110,6 +118,12 @@ impl RecordingOverlay {
         }
 
         self.set_mode(mode);
+        if let Ok(mut state) = self.state.lock() {
+            if !state.visible {
+                state.pulse_started_at = Instant::now();
+            }
+            state.visible = true;
+        }
         let hwnd = self.window_handle();
         if hwnd != 0 {
             unsafe {
@@ -123,6 +137,9 @@ impl RecordingOverlay {
             return;
         }
 
+        if let Ok(mut state) = self.state.lock() {
+            state.visible = false;
+        }
         let hwnd = self.window_handle();
         if hwnd != 0 {
             unsafe {
@@ -247,6 +264,7 @@ unsafe extern "system" fn window_proc(
         WM_APP_SHOW => {
             unsafe {
                 let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                let _ = SetTimer(hwnd, PULSE_TIMER_ID, PULSE_INTERVAL_MS, None);
                 let _ = InvalidateRect(hwnd, ptr::null(), 1);
                 let _ = UpdateWindow(hwnd);
             }
@@ -254,6 +272,7 @@ unsafe extern "system" fn window_proc(
         }
         WM_APP_HIDE => {
             unsafe {
+                let _ = KillTimer(hwnd, PULSE_TIMER_ID);
                 let _ = ShowWindow(hwnd, SW_HIDE);
             }
             0
@@ -283,9 +302,20 @@ unsafe extern "system" fn window_proc(
         }
         WM_APP_CLOSE | WM_CLOSE => {
             unsafe {
+                let _ = KillTimer(hwnd, PULSE_TIMER_ID);
                 let _ = DestroyWindow(hwnd);
             }
             0
+        }
+        WM_TIMER => {
+            if w_param == PULSE_TIMER_ID {
+                unsafe {
+                    let _ = InvalidateRect(hwnd, ptr::null(), 1);
+                }
+                0
+            } else {
+                unsafe { DefWindowProcW(hwnd, message, w_param, l_param) }
+            }
         }
         WM_PAINT => {
             paint_overlay(hwnd);
@@ -309,9 +339,10 @@ fn paint_overlay(hwnd: HWND) {
         let _ = GetClientRect(hwnd, &mut rect);
         let dpi = current_dpi(hwnd);
         let metrics = overlay_metrics(dpi);
+        let dot = current_dot_metrics(&metrics);
 
-        if !paint_overlay_antialiased(hdc, &rect, &metrics) {
-            paint_overlay_fallback_gdi(hdc, &rect, &metrics);
+        if !paint_overlay_antialiased(hdc, &rect, &metrics, &dot) {
+            paint_overlay_fallback_gdi(hdc, &rect, &metrics, &dot);
         }
 
         let _ = SetBkMode(hdc, TRANSPARENT as i32);
@@ -357,6 +388,7 @@ fn paint_overlay_antialiased(
     hdc: windows_sys::Win32::Graphics::Gdi::HDC,
     rect: &RECT,
     metrics: &OverlayMetrics,
+    dot_metrics: &DotRenderMetrics,
 ) -> bool {
     if !ensure_gdiplus() {
         return false;
@@ -388,7 +420,7 @@ fn paint_overlay_antialiased(
                 && !fill.is_null()
                 && GdipCreatePen1(argb(255, 212, 212, 212), 1.0, UnitPixel, &mut pen) == 0
                 && !pen.is_null()
-                && GdipCreateSolidFill(argb(255, 255, 59, 48), &mut dot) == 0
+                && GdipCreateSolidFill(dot_metrics.color, &mut dot) == 0
                 && !dot.is_null();
         }
         if ok {
@@ -398,10 +430,10 @@ fn paint_overlay_antialiased(
                 && GdipFillEllipseI(
                     graphics,
                     dot as *mut GpBrush,
-                    metrics.dot_left,
-                    metrics.dot_top,
-                    metrics.dot_size,
-                    metrics.dot_size,
+                    dot_metrics.left,
+                    dot_metrics.top,
+                    dot_metrics.size,
+                    dot_metrics.size,
                 ) == 0;
         }
 
@@ -427,6 +459,7 @@ fn paint_overlay_fallback_gdi(
     hdc: windows_sys::Win32::Graphics::Gdi::HDC,
     rect: &RECT,
     metrics: &OverlayMetrics,
+    dot_metrics: &DotRenderMetrics,
 ) {
     unsafe {
         let background = CreateSolidBrush(rgb(247, 247, 247));
@@ -452,14 +485,14 @@ fn paint_overlay_fallback_gdi(
         let _ = DeleteObject(border_pen as _);
         let _ = DeleteObject(background as _);
 
-        let dot_brush = CreateSolidBrush(rgb(255, 59, 48));
+        let dot_brush = CreateSolidBrush(dot_metrics.gdi_color);
         let old_brush = SelectObject(hdc, dot_brush as _);
         let _ = Ellipse(
             hdc,
-            metrics.dot_left,
-            metrics.dot_top,
-            metrics.dot_left + metrics.dot_size,
-            metrics.dot_top + metrics.dot_size,
+            dot_metrics.left,
+            dot_metrics.top,
+            dot_metrics.left + dot_metrics.size,
+            dot_metrics.top + dot_metrics.size,
         );
         let _ = SelectObject(hdc, old_brush);
         let _ = DeleteObject(dot_brush as _);
@@ -541,6 +574,50 @@ fn overlay_metrics(dpi: u32) -> OverlayMetrics {
         dot_size,
         text_left: scale_i32(BASE_TEXT_LEFT, dpi),
         text_right: scale_i32(BASE_TEXT_RIGHT, dpi),
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DotRenderMetrics {
+    left: i32,
+    top: i32,
+    size: i32,
+    color: u32,
+    gdi_color: COLORREF,
+}
+
+fn current_dot_metrics(metrics: &OverlayMetrics) -> DotRenderMetrics {
+    let state = OVERLAY_STATE
+        .get()
+        .and_then(|state| state.lock().ok().map(|value| value.clone()));
+
+    let Some(state) = state else {
+        return DotRenderMetrics {
+            left: metrics.dot_left,
+            top: metrics.dot_top,
+            size: metrics.dot_size,
+            color: argb(255, 255, 59, 48),
+            gdi_color: rgb(255, 59, 48),
+        };
+    };
+
+    let elapsed = state.pulse_started_at.elapsed().as_secs_f32();
+    let wave = (elapsed * std::f32::consts::TAU * 1.4).sin();
+    let scale = 1.0 + 0.22 * ((wave + 1.0) * 0.5);
+    let size = ((metrics.dot_size as f32) * scale).round() as i32;
+    let size = size.max(metrics.dot_size);
+    let offset = (size - metrics.dot_size) / 2;
+    let tint = ((wave + 1.0) * 0.5 * 28.0).round() as u8;
+    let red = 227_u8.saturating_add(tint);
+    let green = 48_u8.saturating_add(tint / 4);
+    let blue = 48_u8.saturating_add(tint / 4);
+
+    DotRenderMetrics {
+        left: metrics.dot_left - offset,
+        top: metrics.dot_top - offset,
+        size,
+        color: argb(255, red, green, blue),
+        gdi_color: rgb(red, green, blue),
     }
 }
 
