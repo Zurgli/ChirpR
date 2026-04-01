@@ -20,6 +20,7 @@ const HOUSEKEEPING_INTERVAL: Duration = Duration::from_secs(1);
 struct AppState {
     active_recording: Option<ActiveRecording>,
     recording_started_at: Option<Instant>,
+    transcription_in_progress: bool,
 }
 
 pub struct ChirpApp {
@@ -30,7 +31,7 @@ pub struct ChirpApp {
     overlay: Arc<Mutex<RecordingOverlay>>,
     audio_feedback: AudioFeedback,
     parakeet: Arc<Mutex<ParakeetManager>>,
-    state: Mutex<AppState>,
+    state: Arc<Mutex<AppState>>,
 }
 
 impl ChirpApp {
@@ -60,16 +61,20 @@ impl ChirpApp {
                 config.audio_feedback_volume,
                 paths.assets_root.join("sounds"),
             ),
-            overlay: Arc::new(Mutex::new(RecordingOverlay::new(config.recording_overlay))),
+            overlay: Arc::new(Mutex::new(RecordingOverlay::new(
+                config.recording_overlay,
+                &config.overlay_indicator,
+            ))),
             config,
             paths,
             keyboard,
             shortcut_listener,
             parakeet,
-            state: Mutex::new(AppState {
+            state: Arc::new(Mutex::new(AppState {
                 active_recording: None,
                 recording_started_at: None,
-            }),
+                transcription_in_progress: false,
+            })),
         })
     }
 
@@ -96,6 +101,17 @@ impl ChirpApp {
     }
 
     fn run_housekeeping(&self) -> Result<()> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("app state lock poisoned"))?;
+        let can_unload = state.active_recording.is_none() && !state.transcription_in_progress;
+        drop(state);
+
+        if !can_unload {
+            return Ok(());
+        }
+
         let mut manager = self
             .parakeet
             .lock()
@@ -134,9 +150,19 @@ impl ChirpApp {
         } else {
             let recording = state.active_recording.take().expect("recording present");
             state.recording_started_at = None;
+            state.transcription_in_progress = true;
             drop(state);
+            let model_ready = self
+                .parakeet
+                .lock()
+                .map(|manager| manager.is_loaded())
+                .unwrap_or(false);
             if let Ok(overlay) = self.overlay.lock() {
-                overlay.show("loading");
+                if model_ready {
+                    overlay.show("transcribing");
+                } else {
+                    overlay.show("loading");
+                }
             }
             self.audio_feedback
                 .play_stop(self.config.stop_sound_path.as_deref());
@@ -176,6 +202,7 @@ impl ChirpApp {
         let keyboard = Arc::clone(&self.keyboard);
         let parakeet = Arc::clone(&self.parakeet);
         let audio_feedback = self.audio_feedback.clone();
+        let state = Arc::clone(&self.state);
 
         thread::spawn(move || {
             let processor =
@@ -195,6 +222,9 @@ impl ChirpApp {
                 Err(error) => {
                     error!("failed to stop recording: {error:#}");
                     audio_feedback.play_error(config.error_sound_path.as_deref());
+                    if let Ok(mut state) = state.lock() {
+                        state.transcription_in_progress = false;
+                    }
                     return;
                 }
             };
@@ -222,6 +252,10 @@ impl ChirpApp {
 
             if let Ok(overlay) = overlay.lock() {
                 overlay.hide();
+            }
+
+            if let Ok(mut state) = state.lock() {
+                state.transcription_in_progress = false;
             }
         });
     }
@@ -265,7 +299,6 @@ pub fn transcribe_capture(
         let mut manager = manager
             .lock()
             .map_err(|_| anyhow::anyhow!("parakeet manager lock poisoned"))?;
-        manager.maybe_unload();
         manager.greedy_decode_waveform(&audio.mono_samples, 10)?
     } else {
         let model_dir = paths.model_dir(

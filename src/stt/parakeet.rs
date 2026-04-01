@@ -436,6 +436,7 @@ impl ParakeetManager {
         }
 
         let text = bundle.vocabulary.decode_text(&token_ids);
+        self.last_access = Instant::now();
         Ok(GreedyDecodeResult {
             token_ids,
             text,
