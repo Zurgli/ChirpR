@@ -149,8 +149,17 @@ impl ChirpApp {
             state.recording_started_at = None;
             state.transcription_in_progress = true;
             drop(state);
+            let model_ready = self
+                .parakeet
+                .lock()
+                .map(|manager| manager.is_loaded())
+                .unwrap_or(false);
             if let Ok(overlay) = self.overlay.lock() {
-                overlay.show("loading");
+                if model_ready {
+                    overlay.show("transcribing");
+                } else {
+                    overlay.show("loading");
+                }
             }
             self.audio_feedback
                 .play_stop(self.config.stop_sound_path.as_deref());
