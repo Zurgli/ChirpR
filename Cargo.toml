@@ -1,6 +1,6 @@
 [package]
 name = "chirpr"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 
 [lib]
@@ -13,6 +13,10 @@ path = "src/main.rs"
 [[bin]]
 name = "chirpr"
 path = "src/bin/chirpr.rs"
+
+[[bin]]
+name = "chirpr-indicator-gallery"
+path = "src/bin/chirpr_indicator_gallery.rs"
 
 [dependencies]
 anyhow = "1.0"

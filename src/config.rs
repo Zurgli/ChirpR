@@ -17,6 +17,7 @@ pub const DEFAULT_CLIPBOARD_CLEAR_DELAY: f32 = 0.75;
 pub const DEFAULT_MODEL_TIMEOUT: f32 = 10.0;
 pub const DEFAULT_AUDIO_FEEDBACK_VOLUME: f32 = 0.25;
 pub const DEFAULT_MAX_RECORDING_DURATION: f32 = 45.0;
+pub const DEFAULT_OVERLAY_INDICATOR: &str = "sine_eye_double";
 pub const MAX_ALLOWED_DURATION: f32 = 7200.0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,6 +115,7 @@ pub struct ChirpConfig {
     pub audio_feedback: bool,
     pub audio_feedback_volume: f32,
     pub recording_overlay: bool,
+    pub overlay_indicator: String,
     pub start_sound_path: Option<PathBuf>,
     pub stop_sound_path: Option<PathBuf>,
     pub error_sound_path: Option<PathBuf>,
@@ -140,6 +142,7 @@ impl Default for ChirpConfig {
             audio_feedback: true,
             audio_feedback_volume: DEFAULT_AUDIO_FEEDBACK_VOLUME,
             recording_overlay: true,
+            overlay_indicator: DEFAULT_OVERLAY_INDICATOR.to_string(),
             start_sound_path: None,
             stop_sound_path: None,
             error_sound_path: None,
@@ -210,6 +213,10 @@ impl ChirpConfig {
                 .audio_feedback_volume
                 .unwrap_or(defaults.audio_feedback_volume),
             recording_overlay: raw.recording_overlay.unwrap_or(defaults.recording_overlay),
+            overlay_indicator: raw
+                .overlay_indicator
+                .unwrap_or(defaults.overlay_indicator)
+                .to_ascii_lowercase(),
             start_sound_path: normalize_optional_string(raw.start_sound_path).map(PathBuf::from),
             stop_sound_path: normalize_optional_string(raw.stop_sound_path).map(PathBuf::from),
             error_sound_path: normalize_optional_string(raw.error_sound_path).map(PathBuf::from),
@@ -260,6 +267,16 @@ impl ChirpConfig {
             bail!(
                 "model_timeout must be non-negative, got {}",
                 self.model_timeout
+            );
+        }
+
+        if self.overlay_indicator != "dot"
+            && self.overlay_indicator != "halo_soft"
+            && self.overlay_indicator != "sine_eye_double"
+        {
+            bail!(
+                "overlay_indicator must be 'dot', 'halo_soft', or 'sine_eye_double', got {:?}",
+                self.overlay_indicator
             );
         }
 
@@ -346,6 +363,7 @@ struct RawConfig {
     audio_feedback: Option<bool>,
     audio_feedback_volume: Option<f32>,
     recording_overlay: Option<bool>,
+    overlay_indicator: Option<String>,
     start_sound_path: Option<String>,
     stop_sound_path: Option<String>,
     error_sound_path: Option<String>,
@@ -427,6 +445,16 @@ mod tests {
     }
 
     #[test]
+    fn invalid_overlay_indicator_fails() {
+        let config = ChirpConfig {
+            overlay_indicator: "blob".into(),
+            ..ChirpConfig::default()
+        };
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("overlay_indicator must be 'dot', 'halo_soft', or 'sine_eye_double'"));
+    }
+
+    #[test]
     fn model_dir_adds_int8_suffix() {
         let paths = sample_paths();
         let model_dir = paths
@@ -468,6 +496,7 @@ mod tests {
             audio_feedback: None,
             audio_feedback_volume: None,
             recording_overlay: None,
+            overlay_indicator: Some("Halo_Soft".into()),
             start_sound_path: None,
             stop_sound_path: None,
             error_sound_path: None,
@@ -480,6 +509,7 @@ mod tests {
         assert_eq!(config.onnx_providers, "cpu");
         assert_eq!(config.injection_mode, "paste");
         assert_eq!(config.paste_mode, "ctrl+shift");
+        assert_eq!(config.overlay_indicator, "halo_soft");
         assert!(config.word_overrides.contains_key("parra keat"));
     }
 
@@ -503,6 +533,7 @@ mod tests {
             audio_feedback: None,
             audio_feedback_volume: None,
             recording_overlay: None,
+            overlay_indicator: None,
             start_sound_path: None,
             stop_sound_path: None,
             error_sound_path: None,

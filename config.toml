@@ -14,6 +14,7 @@ model_timeout = 10.0                          # Unload model sessions after this
 audio_feedback = true                         # Enables start/stop chime playback and error feedback.
 audio_feedback_volume = 0.25                  # Volume for fallback WAV playback as a fraction of full scale (0.0 to 1.0).
 recording_overlay = true                      # Enables the always-on-top recording overlay window.
+overlay_indicator = "sine_eye_double"         # Overlay indicator style: "dot", "halo_soft", or "sine_eye_double". The default is the compact eye-shaped sine mark.
 start_sound_path = ""                         # Leave blank to use the bundled start chirp in assets/sounds/ping-up.wav.
 stop_sound_path = ""                          # Leave blank to use the bundled stop chirp in assets/sounds/ping-down.wav.
 error_sound_path = ""                         # Leave blank to use the default system error beep.

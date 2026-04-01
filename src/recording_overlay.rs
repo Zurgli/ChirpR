@@ -7,15 +7,16 @@ use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
-    BeginPaint, CreateRoundRectRgn, CreateSolidBrush, DT_CENTER, DT_SINGLELINE, DT_VCENTER,
-    DeleteObject, DrawTextW, Ellipse, EndPaint, FillRect, InvalidateRect, PAINTSTRUCT, RoundRect,
-    SelectObject, SetBkMode, SetTextColor, SetWindowRgn, TRANSPARENT, UpdateWindow,
+    BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateRoundRectRgn,
+    CreateSolidBrush, DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawTextW,
+    Ellipse, EndPaint, FillRect, InvalidateRect, PAINTSTRUCT, RoundRect, SRCCOPY, SelectObject,
+    SetBkMode, SetTextColor, SetWindowRgn, TRANSPARENT, UpdateWindow,
 };
 use windows_sys::Win32::Graphics::GdiPlus::{
     CompositingQualityHighQuality, FillModeAlternate, GdipAddPathArc, GdipAddPathLine,
     GdipClosePathFigure, GdipCreateFromHDC, GdipCreatePath, GdipCreatePen1, GdipCreateSolidFill,
-    GdipDeleteBrush, GdipDeleteGraphics, GdipDeletePath, GdipDeletePen, GdipDrawPath,
-    GdipFillEllipseI, GdipFillPath, GdipGraphicsClear, GdipSetCompositingQuality,
+    GdipDeleteBrush, GdipDeleteGraphics, GdipDeletePath, GdipDeletePen, GdipDrawEllipseI,
+    GdipDrawLineI, GdipDrawPath, GdipFillEllipseI, GdipFillPath, GdipGraphicsClear, GdipSetCompositingQuality,
     GdipSetPixelOffsetMode, GdipSetSmoothingMode, GdipSetTextRenderingHint, GdiplusStartup,
     GdiplusStartupInput, GpBrush, GpGraphics, GpPath, GpPen, LineJoinRound, PixelOffsetModeHalf,
     SmoothingModeAntiAlias, TextRenderingHintClearTypeGridFit, UnitPixel,
@@ -30,7 +31,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetMessageW, GetSystemMetrics, KillTimer, MSG, PostMessageW, PostQuitMessage,
     RegisterClassW, SM_CXSCREEN, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOZORDER,
     SetProcessDPIAware, SetTimer, SetWindowPos, ShowWindow, TranslateMessage, WM_APP, WM_CLOSE,
-    WM_DESTROY, WM_DPICHANGED, WM_PAINT, WM_TIMER, WNDCLASSW, WS_EX_NOACTIVATE,
+    WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_PAINT, WM_TIMER, WNDCLASSW, WS_EX_NOACTIVATE,
     WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
@@ -39,14 +40,15 @@ const WM_APP_HIDE: u32 = WM_APP + 2;
 const WM_APP_CLOSE: u32 = WM_APP + 3;
 const WM_APP_SET_MODE: u32 = WM_APP + 4;
 const PULSE_TIMER_ID: usize = 1;
-const PULSE_INTERVAL_MS: u32 = 140;
+const PULSE_INTERVAL_MS: u32 = 42;
 const BASE_OVERLAY_WIDTH: i32 = 156;
 const BASE_OVERLAY_HEIGHT: i32 = 24;
 const BASE_TOP_MARGIN: i32 = 0;
 const BASE_CORNER_RADIUS: i32 = 6;
-const BASE_DOT_LEFT: i32 = 12;
-const BASE_DOT_SIZE: i32 = 5;
-const BASE_TEXT_LEFT: i32 = 24;
+const BASE_INDICATOR_LEFT: i32 = 12;
+const BASE_INDICATOR_WIDTH: i32 = 12;
+const BASE_INDICATOR_HEIGHT: i32 = 14;
+const BASE_TEXT_LEFT: i32 = 30;
 const BASE_TEXT_RIGHT: i32 = 8;
 
 static CLASS_NAME: &str = "ChirpRustRecordingOverlay";
@@ -66,6 +68,24 @@ struct OverlayState {
     label: String,
     visible: bool,
     pulse_started_at: Instant,
+    indicator_style: IndicatorStyle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IndicatorStyle {
+    Dot,
+    HaloSoft,
+    SineEyeDouble,
+}
+
+impl IndicatorStyle {
+    fn from_config(value: &str) -> Self {
+        match value {
+            "dot" => Self::Dot,
+            "halo_soft" => Self::HaloSoft,
+            _ => Self::SineEyeDouble,
+        }
+    }
 }
 
 pub struct RecordingOverlay {
@@ -75,7 +95,8 @@ pub struct RecordingOverlay {
 }
 
 impl RecordingOverlay {
-    pub fn new(enabled: bool) -> Self {
+    pub fn new(enabled: bool, indicator_style: &str) -> Self {
+        let indicator_style = IndicatorStyle::from_config(indicator_style);
         if !enabled || !cfg!(target_os = "windows") {
             return Self {
                 enabled: false,
@@ -84,6 +105,7 @@ impl RecordingOverlay {
                     label: "Transcribing".to_string(),
                     visible: false,
                     pulse_started_at: Instant::now(),
+                    indicator_style,
                 })),
             };
         }
@@ -93,6 +115,7 @@ impl RecordingOverlay {
             label: "Transcribing".to_string(),
             visible: false,
             pulse_started_at: Instant::now(),
+            indicator_style,
         }));
         let _ = OVERLAY_STATE.set(Arc::clone(&state));
         let ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -307,10 +330,14 @@ unsafe extern "system" fn window_proc(
             }
             0
         }
+        WM_ERASEBKGND => 1,
         WM_TIMER => {
             if w_param == PULSE_TIMER_ID {
                 unsafe {
-                    let _ = InvalidateRect(hwnd, ptr::null(), 0);
+                    let dpi = current_dpi(hwnd);
+                    let metrics = overlay_metrics(dpi);
+                    let indicator_rect = current_indicator_invalidation_rect(&metrics, dpi);
+                    let _ = InvalidateRect(hwnd, &indicator_rect, 0);
                 }
                 0
             } else {
@@ -335,18 +362,39 @@ fn paint_overlay(hwnd: HWND) {
     unsafe {
         let mut ps: PAINTSTRUCT = std::mem::zeroed();
         let hdc = BeginPaint(hwnd, &mut ps);
+        if hdc.is_null() {
+            return;
+        }
+
         let mut rect: RECT = std::mem::zeroed();
         let _ = GetClientRect(hwnd, &mut rect);
         let dpi = current_dpi(hwnd);
         let metrics = overlay_metrics(dpi);
-        let dot = current_dot_metrics(&metrics);
+        let indicator = current_indicator_metrics(&metrics);
+        let width = (rect.right - rect.left).max(1);
+        let height = (rect.bottom - rect.top).max(1);
 
-        if !paint_overlay_antialiased(hdc, &rect, &metrics, &dot) {
-            paint_overlay_fallback_gdi(hdc, &rect, &metrics, &dot);
+        let mem_dc = CreateCompatibleDC(hdc);
+        if mem_dc.is_null() {
+            EndPaint(hwnd, &ps);
+            return;
         }
 
-        let _ = SetBkMode(hdc, TRANSPARENT as i32);
-        let _ = SetTextColor(hdc, rgb(17, 17, 17) as COLORREF);
+        let mem_bitmap = CreateCompatibleBitmap(hdc, width, height);
+        if mem_bitmap.is_null() {
+            let _ = DeleteDC(mem_dc);
+            EndPaint(hwnd, &ps);
+            return;
+        }
+
+        let old_bitmap = SelectObject(mem_dc, mem_bitmap as _);
+
+        if !paint_overlay_antialiased(mem_dc, &rect, &metrics, &indicator) {
+            paint_overlay_fallback_gdi(mem_dc, &rect, &metrics, &indicator);
+        }
+
+        let _ = SetBkMode(mem_dc, TRANSPARENT as i32);
+        let _ = SetTextColor(mem_dc, rgb(17, 17, 17) as COLORREF);
         let mut text_rect = RECT {
             left: metrics.text_left,
             top: 0,
@@ -356,12 +404,17 @@ fn paint_overlay(hwnd: HWND) {
 
         let text = current_label();
         let _ = DrawTextW(
-            hdc,
+            mem_dc,
             text.as_ptr(),
             -1,
             &mut text_rect,
             DT_CENTER | DT_VCENTER | DT_SINGLELINE,
         );
+
+        let _ = BitBlt(hdc, 0, 0, width, height, mem_dc, 0, 0, SRCCOPY);
+        let _ = SelectObject(mem_dc, old_bitmap);
+        let _ = DeleteObject(mem_bitmap as _);
+        let _ = DeleteDC(mem_dc);
 
         EndPaint(hwnd, &ps);
     }
@@ -388,7 +441,7 @@ fn paint_overlay_antialiased(
     hdc: windows_sys::Win32::Graphics::Gdi::HDC,
     rect: &RECT,
     metrics: &OverlayMetrics,
-    dot_metrics: &DotRenderMetrics,
+    indicator_metrics: &IndicatorRenderMetrics,
 ) -> bool {
     if !ensure_gdiplus() {
         return false;
@@ -403,7 +456,8 @@ fn paint_overlay_antialiased(
         let mut path: *mut GpPath = ptr::null_mut();
         let mut fill: *mut windows_sys::Win32::Graphics::GdiPlus::GpSolidFill = ptr::null_mut();
         let mut pen: *mut GpPen = ptr::null_mut();
-        let mut dot: *mut windows_sys::Win32::Graphics::GdiPlus::GpSolidFill = ptr::null_mut();
+        let mut indicator_brush: *mut windows_sys::Win32::Graphics::GdiPlus::GpSolidFill =
+            ptr::null_mut();
 
         let _ = GdipSetSmoothingMode(graphics, SmoothingModeAntiAlias);
         let _ = GdipSetCompositingQuality(graphics, CompositingQualityHighQuality);
@@ -419,26 +473,24 @@ fn paint_overlay_antialiased(
             ok = GdipCreateSolidFill(argb(255, 247, 247, 247), &mut fill) == 0
                 && !fill.is_null()
                 && GdipCreatePen1(argb(255, 212, 212, 212), 1.0, UnitPixel, &mut pen) == 0
-                && !pen.is_null()
-                && GdipCreateSolidFill(dot_metrics.color, &mut dot) == 0
-                && !dot.is_null();
+                && !pen.is_null();
         }
         if ok {
             let _ = windows_sys::Win32::Graphics::GdiPlus::GdipSetPenLineJoin(pen, LineJoinRound);
             ok = GdipFillPath(graphics, fill as *mut GpBrush, path) == 0
-                && GdipDrawPath(graphics, pen, path) == 0
-                && GdipFillEllipseI(
-                    graphics,
-                    dot as *mut GpBrush,
-                    dot_metrics.left,
-                    dot_metrics.top,
-                    dot_metrics.size,
-                    dot_metrics.size,
-                ) == 0;
+                && GdipDrawPath(graphics, pen, path) == 0;
+        }
+        if ok {
+            ok = draw_indicator_antialiased(
+                graphics,
+                indicator_metrics,
+                &mut indicator_brush,
+                pen,
+            );
         }
 
-        if !dot.is_null() {
-            let _ = GdipDeleteBrush(dot as *mut GpBrush);
+        if !indicator_brush.is_null() {
+            let _ = GdipDeleteBrush(indicator_brush as *mut GpBrush);
         }
         if !pen.is_null() {
             let _ = GdipDeletePen(pen);
@@ -459,7 +511,7 @@ fn paint_overlay_fallback_gdi(
     hdc: windows_sys::Win32::Graphics::Gdi::HDC,
     rect: &RECT,
     metrics: &OverlayMetrics,
-    dot_metrics: &DotRenderMetrics,
+    indicator_metrics: &IndicatorRenderMetrics,
 ) {
     unsafe {
         let background = CreateSolidBrush(rgb(247, 247, 247));
@@ -485,17 +537,7 @@ fn paint_overlay_fallback_gdi(
         let _ = DeleteObject(border_pen as _);
         let _ = DeleteObject(background as _);
 
-        let dot_brush = CreateSolidBrush(dot_metrics.gdi_color);
-        let old_brush = SelectObject(hdc, dot_brush as _);
-        let _ = Ellipse(
-            hdc,
-            dot_metrics.left,
-            dot_metrics.top,
-            dot_metrics.left + dot_metrics.size,
-            dot_metrics.top + dot_metrics.size,
-        );
-        let _ = SelectObject(hdc, old_brush);
-        let _ = DeleteObject(dot_brush as _);
+        draw_indicator_fallback_gdi(hdc, indicator_metrics);
     }
 }
 
@@ -557,68 +599,338 @@ fn ensure_gdiplus() -> bool {
 #[derive(Debug, Clone, Copy)]
 struct OverlayMetrics {
     corner_radius: i32,
-    dot_left: i32,
-    dot_top: i32,
-    dot_size: i32,
+    indicator_left: i32,
+    indicator_top: i32,
+    indicator_width: i32,
+    indicator_height: i32,
     text_left: i32,
     text_right: i32,
 }
 
 fn overlay_metrics(dpi: u32) -> OverlayMetrics {
     let height = scale_i32(BASE_OVERLAY_HEIGHT, dpi);
-    let dot_size = scale_i32(BASE_DOT_SIZE, dpi);
+    let indicator_width = scale_i32(BASE_INDICATOR_WIDTH, dpi);
+    let indicator_height = scale_i32(BASE_INDICATOR_HEIGHT, dpi);
     OverlayMetrics {
         corner_radius: scale_i32(BASE_CORNER_RADIUS, dpi),
-        dot_left: scale_i32(BASE_DOT_LEFT, dpi),
-        dot_top: ((height - dot_size) / 2).max(1),
-        dot_size,
+        indicator_left: scale_i32(BASE_INDICATOR_LEFT, dpi),
+        indicator_top: ((height - indicator_height) / 2).max(1),
+        indicator_width,
+        indicator_height,
         text_left: scale_i32(BASE_TEXT_LEFT, dpi),
         text_right: scale_i32(BASE_TEXT_RIGHT, dpi),
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-struct DotRenderMetrics {
+struct IndicatorRenderMetrics {
+    style: IndicatorStyle,
     left: i32,
     top: i32,
-    size: i32,
+    width: i32,
+    height: i32,
     color: u32,
     gdi_color: COLORREF,
+    phase: f32,
+    elapsed: f32,
 }
 
-fn current_dot_metrics(metrics: &OverlayMetrics) -> DotRenderMetrics {
+fn current_indicator_metrics(metrics: &OverlayMetrics) -> IndicatorRenderMetrics {
     let state = OVERLAY_STATE
         .get()
         .and_then(|state| state.lock().ok().map(|value| value.clone()));
 
     let Some(state) = state else {
-        return DotRenderMetrics {
-            left: metrics.dot_left,
-            top: metrics.dot_top,
-            size: metrics.dot_size,
+        return IndicatorRenderMetrics {
+            style: IndicatorStyle::SineEyeDouble,
+            left: metrics.indicator_left,
+            top: metrics.indicator_top,
+            width: metrics.indicator_width,
+            height: metrics.indicator_height,
             color: argb(255, 255, 59, 48),
             gdi_color: rgb(255, 59, 48),
+            phase: 1.0,
+            elapsed: 0.0,
         };
     };
 
     let elapsed = state.pulse_started_at.elapsed().as_secs_f32();
-    let wave = (elapsed * std::f32::consts::TAU * 0.75).sin();
-    let scale = 1.0 + 0.08 * ((wave + 1.0) * 0.5);
-    let size = ((metrics.dot_size as f32) * scale).round() as i32;
-    let size = size.max(metrics.dot_size);
-    let offset = (size - metrics.dot_size) / 2;
-    let tint = ((wave + 1.0) * 0.5 * 12.0).round() as u8;
-    let red = 243_u8.saturating_add(tint);
-    let green = 58_u8.saturating_add(tint / 6);
-    let blue = 48_u8.saturating_add(tint / 8);
+    let wave = (elapsed * std::f32::consts::TAU * 0.6).sin();
+    let phase = (wave + 1.0) * 0.5;
+    let red = (228.0 + 24.0 * phase).round() as u8;
+    let green = (54.0 + 7.0 * phase).round() as u8;
+    let blue = (46.0 + 5.0 * phase).round() as u8;
+    let alpha = (35.0 + 220.0 * phase).round() as u8;
 
-    DotRenderMetrics {
-        left: metrics.dot_left - offset,
-        top: metrics.dot_top - offset,
-        size,
-        color: argb(255, red, green, blue),
+    let (left, top, width, height) = match state.indicator_style {
+        IndicatorStyle::Dot => {
+            let size = scale_indicator_dimension(metrics.indicator_height, 0.36).max(4);
+            let left = metrics.indicator_left + (metrics.indicator_width - size) / 2;
+            let top = metrics.indicator_top + (metrics.indicator_height - size) / 2;
+            (left, top, size, size)
+        }
+        IndicatorStyle::HaloSoft => {
+            let size = scale_indicator_dimension(metrics.indicator_height, 1.18);
+            let left = metrics.indicator_left + (metrics.indicator_width - size) / 2;
+            let top = metrics.indicator_top + (metrics.indicator_height - size) / 2;
+            (left, top, size, size)
+        }
+        IndicatorStyle::SineEyeDouble => {
+            let height = scale_indicator_dimension(metrics.indicator_height, 0.68).max(8);
+            let width = scale_indicator_dimension(height, 2.0).max(height + 8);
+            let left = metrics.indicator_left + (metrics.indicator_width - width) / 2;
+            let top = metrics.indicator_top + (metrics.indicator_height - height) / 2;
+            (left, top, width, height)
+        }
+    };
+
+    IndicatorRenderMetrics {
+        style: state.indicator_style,
+        left,
+        top,
+        width,
+        height,
+        color: argb(alpha, red, green, blue),
         gdi_color: rgb(red, green, blue),
+        phase,
+        elapsed,
     }
+}
+
+fn current_indicator_invalidation_rect(metrics: &OverlayMetrics, dpi: u32) -> RECT {
+    let indicator = current_indicator_metrics(metrics);
+    let padding = match indicator.style {
+        IndicatorStyle::Dot => scale_i32(2, dpi),
+        IndicatorStyle::HaloSoft => scale_i32(4, dpi),
+        IndicatorStyle::SineEyeDouble => scale_i32(3, dpi),
+    };
+    RECT {
+        left: indicator.left - padding,
+        top: indicator.top - padding,
+        right: indicator.left + indicator.width + padding,
+        bottom: indicator.top + indicator.height + padding,
+    }
+}
+
+fn draw_indicator_antialiased(
+    graphics: *mut GpGraphics,
+    indicator: &IndicatorRenderMetrics,
+    brush_slot: &mut *mut windows_sys::Win32::Graphics::GdiPlus::GpSolidFill,
+    pen: *mut GpPen,
+) -> bool {
+    unsafe {
+        match indicator.style {
+            IndicatorStyle::Dot => {
+                GdipCreateSolidFill(indicator.color, brush_slot) == 0
+                    && !(*brush_slot).is_null()
+                    && GdipFillEllipseI(
+                        graphics,
+                        *brush_slot as *mut GpBrush,
+                        indicator.left,
+                        indicator.top,
+                        indicator.width,
+                        indicator.height,
+                    ) == 0
+            }
+            IndicatorStyle::HaloSoft => {
+                let center_size = scale_indicator_dimension(indicator.height, 0.46).max(4);
+                let center_left = indicator.left + (indicator.width - center_size) / 2;
+                let center_top = indicator.top + (indicator.height - center_size) / 2;
+                let halo_size =
+                    scale_indicator_dimension(indicator.width, 1.0 + indicator.phase * 0.42)
+                        .max(center_size + 4);
+                let halo_left = indicator.left + (indicator.width - halo_size) / 2;
+                let halo_top = indicator.top + (indicator.height - halo_size) / 2;
+                let halo_alpha = (18.0 + (1.0 - indicator.phase) * 96.0).round() as u8;
+                let halo_color = argb(halo_alpha, 236, 84, 67);
+                let _ = windows_sys::Win32::Graphics::GdiPlus::GdipSetPenColor(pen, halo_color);
+                let _ = windows_sys::Win32::Graphics::GdiPlus::GdipSetPenWidth(
+                    pen,
+                    scale_indicator_stroke(indicator.height, 0.18),
+                );
+                GdipDrawEllipseI(graphics, pen, halo_left, halo_top, halo_size, halo_size) == 0
+                    && GdipCreateSolidFill(indicator.color, brush_slot) == 0
+                    && !(*brush_slot).is_null()
+                    && GdipFillEllipseI(
+                        graphics,
+                        *brush_slot as *mut GpBrush,
+                        center_left,
+                        center_top,
+                        center_size,
+                        center_size,
+                    ) == 0
+            }
+            IndicatorStyle::SineEyeDouble => {
+                draw_sine_eye_double_antialiased(graphics, pen, indicator)
+            }
+        }
+    }
+}
+
+fn draw_indicator_fallback_gdi(
+    hdc: windows_sys::Win32::Graphics::Gdi::HDC,
+    indicator: &IndicatorRenderMetrics,
+) {
+    unsafe {
+        match indicator.style {
+            IndicatorStyle::Dot | IndicatorStyle::HaloSoft => {
+                let size = if indicator.style == IndicatorStyle::Dot {
+                    indicator.width
+                } else {
+                    scale_indicator_dimension(indicator.height, 0.46).max(4)
+                };
+                let left = indicator.left + (indicator.width - size) / 2;
+                let top = indicator.top + (indicator.height - size) / 2;
+                let brush = CreateSolidBrush(indicator.gdi_color);
+                let old_brush = SelectObject(hdc, brush as _);
+                let _ = Ellipse(hdc, left, top, left + size, top + size);
+                let _ = SelectObject(hdc, old_brush);
+                let _ = DeleteObject(brush as _);
+            }
+            IndicatorStyle::SineEyeDouble => {
+                let primary_pen = windows_sys::Win32::Graphics::Gdi::CreatePen(
+                    windows_sys::Win32::Graphics::Gdi::PS_SOLID,
+                    scale_indicator_pen_px(indicator.height, 0.16),
+                    rgb(228, 82, 63),
+                );
+                let secondary_pen = windows_sys::Win32::Graphics::Gdi::CreatePen(
+                    windows_sys::Win32::Graphics::Gdi::PS_SOLID,
+                    scale_indicator_pen_px(indicator.height, 0.16),
+                    rgb(110, 168, 245),
+                );
+                let old_pen = SelectObject(hdc, primary_pen as _);
+                draw_sine_eye_double_gdi(hdc, indicator, 0.0);
+                let _ = SelectObject(hdc, secondary_pen as _);
+                draw_sine_eye_double_gdi(hdc, indicator, std::f32::consts::TAU / 3.0);
+                let _ = SelectObject(hdc, old_pen);
+                let _ = DeleteObject(primary_pen as _);
+                let _ = DeleteObject(secondary_pen as _);
+            }
+        }
+    }
+}
+
+fn draw_sine_eye_double_antialiased(
+    graphics: *mut GpGraphics,
+    pen: *mut GpPen,
+    indicator: &IndicatorRenderMetrics,
+) -> bool {
+    unsafe {
+        let stroke_width = scale_indicator_stroke(indicator.height, 0.16);
+        let primary_points = sine_trace_points(indicator, 0.0);
+        let secondary_points = sine_trace_points(indicator, std::f32::consts::TAU / 3.0);
+
+        let _ = windows_sys::Win32::Graphics::GdiPlus::GdipSetPenColor(
+            pen,
+            argb(
+                (110.0 + indicator.phase * 130.0).round() as u8,
+                228,
+                82,
+                63,
+            ),
+        );
+        let _ = windows_sys::Win32::Graphics::GdiPlus::GdipSetPenWidth(pen, stroke_width);
+
+        let mut secondary_pen: *mut GpPen = ptr::null_mut();
+        let secondary_ok = GdipCreatePen1(
+            argb(
+                (90.0 + indicator.phase * 110.0).round() as u8,
+                110,
+                168,
+                245,
+            ),
+            stroke_width,
+            UnitPixel,
+            &mut secondary_pen,
+        ) == 0
+            && !secondary_pen.is_null();
+        if secondary_ok {
+            let _ = windows_sys::Win32::Graphics::GdiPlus::GdipSetPenLineJoin(
+                secondary_pen,
+                LineJoinRound,
+            );
+        }
+
+        let ok = draw_point_chain_antialiased(graphics, pen, &primary_points)
+            && secondary_ok
+            && draw_point_chain_antialiased(graphics, secondary_pen, &secondary_points);
+
+        if !secondary_pen.is_null() {
+            let _ = GdipDeletePen(secondary_pen);
+        }
+
+        ok
+    }
+}
+
+fn draw_sine_eye_double_gdi(
+    hdc: windows_sys::Win32::Graphics::Gdi::HDC,
+    indicator: &IndicatorRenderMetrics,
+    phase_offset: f32,
+) {
+    unsafe {
+        let points = sine_trace_points(indicator, phase_offset);
+        if let Some((first_x, first_y)) = points.first().copied() {
+            let _ = windows_sys::Win32::Graphics::Gdi::MoveToEx(
+                hdc,
+                first_x,
+                first_y,
+                ptr::null_mut(),
+            );
+            for (x, y) in points.iter().copied().skip(1) {
+                let _ = windows_sys::Win32::Graphics::Gdi::LineTo(hdc, x, y);
+            }
+        }
+    }
+}
+
+fn draw_point_chain_antialiased(
+    graphics: *mut GpGraphics,
+    pen: *mut GpPen,
+    points: &[(i32, i32)],
+) -> bool {
+    for pair in points.windows(2) {
+        unsafe {
+            if GdipDrawLineI(graphics, pen, pair[0].0, pair[0].1, pair[1].0, pair[1].1) != 0 {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn sine_trace_points(indicator: &IndicatorRenderMetrics, phase_offset: f32) -> Vec<(i32, i32)> {
+    let mut points = Vec::with_capacity(28);
+    let center_y = indicator.top as f32 + indicator.height as f32 / 2.0;
+    let inset_x = (indicator.width as f32 * 0.06).round() as i32;
+    let draw_left = indicator.left + inset_x;
+    let draw_width = (indicator.width - inset_x * 2).max(1) as f32;
+    let amplitude = (indicator.height as f32 * 0.34).max(1.0);
+
+    for step in 0..28 {
+        let progress = step as f32 / 27.0;
+        let x = draw_left as f32 + progress * draw_width;
+        let envelope = (progress * std::f32::consts::PI).sin().max(0.0).powf(1.2);
+        let y = center_y
+            + amplitude
+                * envelope
+                * (indicator.elapsed * 2.1 + step as f32 * 0.51 + phase_offset).sin();
+        points.push((x.round() as i32, y.round() as i32));
+    }
+
+    points
+}
+
+fn scale_indicator_dimension(base: i32, factor: f32) -> i32 {
+    ((base as f32) * factor).round().max(1.0) as i32
+}
+
+fn scale_indicator_stroke(base: i32, factor: f32) -> f32 {
+    ((base as f32) * factor).max(1.0)
+}
+
+fn scale_indicator_pen_px(base: i32, factor: f32) -> i32 {
+    scale_indicator_stroke(base, factor).round() as i32
 }
 
 fn overlay_geometry_for_dpi(screen_width: i32, dpi: u32) -> OverlayGeometry {

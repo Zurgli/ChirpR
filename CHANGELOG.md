@@ -12,6 +12,15 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - Updated README to reflect NSIS installer
 
+## [0.2.2] - 2026-04-01
+
+### Added
+- Configurable overlay indicator styles: `dot`, `halo_soft`, and `sine_eye_double`
+
+### Changed
+- Reworked the transcribing overlay indicator with a tapered dual-wave animation option
+- Tightened overlay indicator rendering and preview tooling for faster iteration on animation shape
+
 ## [0.2.1] - 2026-03-31
 
 ### Changed

@@ -61,7 +61,10 @@ impl ChirpApp {
                 config.audio_feedback_volume,
                 paths.assets_root.join("sounds"),
             ),
-            overlay: Arc::new(Mutex::new(RecordingOverlay::new(config.recording_overlay))),
+            overlay: Arc::new(Mutex::new(RecordingOverlay::new(
+                config.recording_overlay,
+                &config.overlay_indicator,
+            ))),
             config,
             paths,
             keyboard,
