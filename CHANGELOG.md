@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.3] - 2026-04-04
+
+### Fixed
+- Resolve config and asset paths from the installed executable location so Start Menu launches no longer treat `assets\` as the app root
+- Register NSIS-installed builds for current-user autostart by default and remove the Run entry during uninstall
+
+### Changed
+- Removed the old non-NSIS installer paths and release artifacts so packaged releases are now NSIS-only
+
 ## [0.2.0] - 2026-03-23
 
 ### Added

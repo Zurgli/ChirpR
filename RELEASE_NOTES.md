@@ -1,32 +1,16 @@
 # Release Notes
 
-## v0.1.0
+## v0.2.3
 
-Initial public ChirpR release.
+This release fixes installed Windows packaging behavior and removes the deprecated non-NSIS installer paths.
 
-### Runtime
+### Fixed
 
-- Added a Windows-native dictation app around local Parakeet ONNX transcription.
-- Added global hotkey recording with configurable max-duration auto-stop.
-- Added paste and type injection modes, with paste as the default for reliability.
-- Preserved prior clipboard text after paste injection when possible.
-- Added start, stop, and error audio feedback.
-- Added a Windows recording overlay with DPI-aware layout.
-- Added idle model unload plus background model prewarm during recording.
+- Start Menu launches now resolve `config.toml` and `assets` from the installed executable location instead of the shortcut working directory.
+- NSIS installs now enable current-user autostart by default.
+- NSIS uninstall now removes the current-user Run entry that was added during install.
 
-### Tooling
+### Changed
 
-- Added `chirpr-cli dev` for automatic restart during development.
-- Added a Windows release staging script at `scripts/build-release.ps1`.
-- Added an NSIS-based Windows installer for packaged releases.
-
-### Configuration
-
-- Default hotkey is `ctrl+shift+space`.
-- `config.toml` includes inline comments describing each supported setting.
-- Included default filler-word removals for `um` and `uh`.
-
-### Windows Integration
-
-- Added `autostart enable|disable|status` support using the current-user Run registry key.
-- Added Start menu shortcuts for launching, settings, and uninstall.
+- Packaged releases are now NSIS-only.
+- Removed the old WiX/MSI and PowerShell installer paths from the repository and release flow.
