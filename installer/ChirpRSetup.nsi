@@ -36,19 +36,18 @@ Section "Install"
     File "${DIST_PATH}\chirpr-cli.exe"
     File "${DIST_PATH}\config.toml"
     File "${DIST_PATH}\LICENSE"
-    File "${DIST_PATH}\run-portable.cmd"
-    File "${DIST_PATH}\install.ps1"
-    File "${DIST_PATH}\uninstall.ps1"
     
     SetOutPath "$INSTDIR\assets"
     File /r "${DIST_PATH}\assets\*.*"
+    SetOutPath "$INSTDIR"
     
     WriteRegStr HKLM "Software\ChirpR" "InstallDir" "$INSTDIR"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChirpR" "DisplayName" "ChirpR"
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChirpR" "UninstallString" "powershell.exe -ExecutionPolicy Bypass -File uninst.tmp"
+    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChirpR" "UninstallString" '"$INSTDIR\uninstall.exe"'
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChirpR" "DisplayVersion "${PRODUCT_VERSION}""
     WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChirpR" "NoModify" 1
     WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChirpR" "NoRepair" 1
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "ChirpRust" '"$INSTDIR\chirpr.exe"'
     
     CreateDirectory "$SMPROGRAMS\ChirpR"
     CreateShortCut "$SMPROGRAMS\ChirpR\ChirpR.lnk" "$INSTDIR\chirpr.exe"
@@ -64,9 +63,6 @@ Section "Uninstall"
     Delete "$INSTDIR\chirpr-cli.exe"
     Delete "$INSTDIR\config.toml"
     Delete "$INSTDIR\LICENSE"
-    Delete "$INSTDIR\run-portable.cmd"
-    Delete "$INSTDIR\install.ps1"
-    Delete "$INSTDIR\uninstall.ps1"
     Delete "$INSTDIR\uninstall.exe"
     RMDir /r "$INSTDIR\assets"
     RMDir "$INSTDIR"
@@ -74,6 +70,7 @@ Section "Uninstall"
     Delete "$SMPROGRAMS\ChirpR\ChirpR.lnk"
     Delete "$SMPROGRAMS\ChirpR\Uninstall ChirpR.lnk"
     RMDir "$SMPROGRAMS\ChirpR"
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "ChirpRust"
     
     DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChirpR"
     DeleteRegKey HKLM "Software\ChirpR"

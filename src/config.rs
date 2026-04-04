@@ -30,9 +30,10 @@ pub struct ProjectPaths {
 
 impl ProjectPaths {
     pub fn discover() -> Result<Self> {
-        let project_root =
-            std::env::current_dir().context("failed to resolve current directory")?;
-        Ok(Self::from_root(project_root))
+        let current_dir = std::env::current_dir().context("failed to resolve current directory")?;
+        let current_exe =
+            std::env::current_exe().context("failed to resolve current executable")?;
+        Ok(Self::discover_from_paths(current_dir, current_exe))
     }
 
     pub fn from_root(project_root: PathBuf) -> Self {
@@ -50,6 +51,16 @@ impl ProjectPaths {
     pub fn with_config_path(mut self, config_path: PathBuf) -> Self {
         self.config_path = config_path;
         self
+    }
+
+    fn discover_from_paths(current_dir: PathBuf, current_exe: PathBuf) -> Self {
+        for candidate in candidate_roots(&current_dir, &current_exe) {
+            if looks_like_project_root(&candidate) {
+                return Self::from_root(candidate);
+            }
+        }
+
+        Self::from_root(current_dir)
     }
 
     pub fn ensure_models_root(&self) -> Result<()> {
@@ -344,6 +355,28 @@ fn normalize_path(path: &Path) -> PathBuf {
     normalized
 }
 
+fn candidate_roots(current_dir: &Path, current_exe: &Path) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    push_ancestors(current_exe.parent(), &mut candidates);
+    push_ancestors(Some(current_dir), &mut candidates);
+    candidates
+}
+
+fn push_ancestors(start: Option<&Path>, candidates: &mut Vec<PathBuf>) {
+    if let Some(start) = start {
+        for ancestor in start.ancestors() {
+            let candidate = ancestor.to_path_buf();
+            if !candidates.contains(&candidate) {
+                candidates.push(candidate);
+            }
+        }
+    }
+}
+
+fn looks_like_project_root(path: &Path) -> bool {
+    path.join("config.toml").is_file() && path.join("assets").is_dir()
+}
+
 #[derive(Debug, Deserialize)]
 struct RawConfig {
     primary_shortcut: Option<String>,
@@ -373,9 +406,18 @@ struct RawConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn sample_paths() -> ProjectPaths {
         ProjectPaths::from_root(PathBuf::from(r"E:\development\chirp\chirp-rust"))
+    }
+
+    fn unique_temp_dir(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("valid system time")
+            .as_nanos();
+        std::env::temp_dir().join(format!("chirpr-{name}-{nanos}"))
     }
 
     #[test]
@@ -451,7 +493,9 @@ mod tests {
             ..ChirpConfig::default()
         };
         let error = config.validate().unwrap_err().to_string();
-        assert!(error.contains("overlay_indicator must be 'dot', 'halo_soft', or 'sine_eye_double'"));
+        assert!(
+            error.contains("overlay_indicator must be 'dot', 'halo_soft', or 'sine_eye_double'")
+        );
     }
 
     #[test]
@@ -543,5 +587,42 @@ mod tests {
         let config = ChirpConfig::from_raw(raw);
         assert_eq!(config.threads, Some(-5));
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn discover_prefers_executable_ancestor_when_cwd_is_wrong() {
+        let root = unique_temp_dir("discover-exe");
+        fs::create_dir_all(root.join("assets")).unwrap();
+        fs::write(
+            root.join("config.toml"),
+            "primary_shortcut = \"ctrl+shift+space\"\n",
+        )
+        .unwrap();
+
+        let exe_path = root.join("target").join("debug").join("chirpr.exe");
+        fs::create_dir_all(exe_path.parent().unwrap()).unwrap();
+        fs::write(&exe_path, "").unwrap();
+
+        let discovered = ProjectPaths::discover_from_paths(root.join("assets"), exe_path);
+
+        assert_eq!(discovered.project_root, root);
+    }
+
+    #[test]
+    fn discover_falls_back_to_current_dir_when_it_is_valid() {
+        let root = unique_temp_dir("discover-cwd");
+        fs::create_dir_all(root.join("assets")).unwrap();
+        fs::write(
+            root.join("config.toml"),
+            "primary_shortcut = \"ctrl+shift+space\"\n",
+        )
+        .unwrap();
+
+        let discovered = ProjectPaths::discover_from_paths(
+            root.clone(),
+            PathBuf::from(r"C:\Windows\System32\chirpr.exe"),
+        );
+
+        assert_eq!(discovered.project_root, root);
     }
 }

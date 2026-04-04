@@ -18,7 +18,6 @@ $launcherSource = Join-Path $repoRoot "target\$TargetTriple\release\chirpr.exe"
 $cargoToml = Join-Path $repoRoot "Cargo.toml"
 $nsiScript = Join-Path $repoRoot "installer\ChirpRSetup.nsi"
 $installerOutput = Join-Path $repoRoot "installer\ChirpRSetup.exe"
-$uninstallScriptSource = Join-Path $repoRoot "installer\Uninstall.ps1"
 
 $cargoVersion = (Select-String -Path $cargoToml -Pattern '^version\s*=\s*"([^"]+)"').Matches.Groups[1].Value
 if ([string]::IsNullOrWhiteSpace($cargoVersion)) {
@@ -67,7 +66,6 @@ $requiredFiles = @(
     $binarySource,
     $launcherSource,
     $soundsSource,
-    $uninstallScriptSource,
     $nsiScript
 )
 foreach ($path in $requiredFiles) {
@@ -105,63 +103,6 @@ $licenseSource = Join-Path $repoRoot "LICENSE"
 if (Test-Path $licenseSource) {
     Copy-Item $licenseSource $bundleRoot
 }
-
-Write-Host "Copying uninstaller..."
-Copy-Item $uninstallScriptSource $bundleRoot
-
-Write-Host "Creating portable launcher..."
-@"
-@echo off
-echo ChirpR Portable Mode
-echo.
-if not exist "config.toml" (
-    echo First run - running setup...
-    call chirpr-cli.exe setup
-)
-echo Starting ChirpR...
-start "" chirpr.exe
-"@ | Out-File -FilePath (Join-Path $bundleRoot "run-portable.cmd") -Encoding ASCII
-
-Write-Host "Creating installer script..."
-$installPs1 = @"
-param([switch]`$Launch)
-
-`$scriptDir = Split-Path -Parent `$MyInvocation.MyCommand.Path
-`$installDir = `$scriptDir
-
-Write-Host "Installing ChirpR to `$installDir..."
-
-`$startMenuFolder = Join-Path ([Environment]::GetFolderPath("StartMenu")) "Programs\ChirpR"
-New-Item -ItemType Directory -Path `$startMenuFolder -Force | Out-Null
-
-`$ws = New-Object -ComObject WScript.Shell
-`$shortcut = `$ws.CreateShortcut("`$startMenuFolder\ChirpR.lnk")
-`$shortcut.TargetPath = Join-Path `$installDir "chirpr.exe"
-`$shortcut.WorkingDirectory = `$installDir
-`$shortcut.Save()
-
-`$uninstallShortcut = `$ws.CreateShortcut("`$startMenuFolder\Uninstall ChirpR.lnk")
-`$uninstallShortcut.TargetPath = "powershell.exe"
-`$uninstallShortcut.Arguments = "-ExecutionPolicy Bypass -File `"`$(Join-Path `$installDir 'uninstall.ps1')`""
-`$uninstallShortcut.WorkingDirectory = `$installDir
-`$uninstallShortcut.Save()
-
-`$regPath = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ChirpR"
-New-Item -Path `$regPath -Force | Out-Null
-Set-ItemProperty -Path `$regPath -Name "DisplayName" -Value "ChirpR"
-Set-ItemProperty -Path `$regPath -Name "DisplayVersion" -Value "$cargoVersion"
-Set-ItemProperty -Path `$regPath -Name "Publisher" -Value "ChirpR"
-Set-ItemProperty -Path `$regPath -Name "InstallLocation" -Value `$installDir
-Set-ItemProperty -Path `$regPath -Name "UninstallString" -Value "powershell.exe -ExecutionPolicy Bypass -File `"`$(Join-Path `$installDir 'uninstall.ps1')`""
-
-Write-Host "Installation complete!"
-if (`$Launch) {
-    Write-Host "Launching ChirpR..."
-    Start-Process (Join-Path `$installDir "chirpr.exe")
-}
-"@
-
-$installPs1 | Out-File -FilePath (Join-Path $bundleRoot "install.ps1") -Encoding ASCII
 
 Write-Host "Building NSIS installer..."
 

@@ -13,17 +13,11 @@ It is a Rust implementation of the original upstream `Whamp/chirp` workflow and 
 - Recording overlay with audio start/stop/error feedback
 - Idle model unload and background model prewarm
 - NSIS-based Windows installer
-- Optional current-user run-at-login support
+- Current-user run-at-login enabled by default for NSIS installs
 
 ## Quick Start
 
-Portable bundle:
-
-```powershell
-.\run-portable.cmd
-```
-
-Installed bundle (NSIS installer):
+Install with the NSIS package:
 
 ```powershell
 .\ChirpRSetup.exe
@@ -63,18 +57,20 @@ This produces:
 - `dist\chirpr-windows-x64\config.toml`
 - `dist\chirpr-windows-x64\LICENSE`
 - `dist\chirpr-windows-x64\assets\sounds\`
-- `dist\chirpr-windows-x64\run-portable.cmd`
 - `dist\chirpr-windows-x64\ChirpRSetup.exe`
-- `dist\chirpr-windows-x64\install.ps1`
-- `dist\chirpr-windows-x64\Uninstall.ps1`
-
-Portable launch runs setup on first use and downloads model files if they are missing.
 
 The NSIS installer flow supports:
 
 - install directory selection
 - automatically kills running instance before upgrade
+- enables current-user autostart by default
 - launches app after installation completes
+
+Disable autostart after install if needed:
+
+```powershell
+.\chirpr-cli.exe autostart disable
+```
 
 The installed app creates Start menu shortcuts for:
 
@@ -88,8 +84,7 @@ Runtime logs currently go to `stderr`.
 Model files are stored under:
 
 - repo/dev use: `assets\models\`
-- portable bundle: `.\assets\models\`
-- installed bundle: inside the MSI-installed app directory under `assets\models\`
+- installed bundle: inside the NSIS-installed app directory under `assets\models\`
 
 ## License
 
