@@ -5,18 +5,17 @@
 - Run `cargo test`
 - Run `cargo run -- check`
 - Build the release bundle with `.\scripts\build-release.ps1`
-- Confirm `dist\chirpr-windows-x64\ChirpRSetup.msi` exists
-- Confirm `dist\chirpr-windows-x64\run-portable.cmd` works on a clean machine or VM
-- Confirm `install.cmd` and direct `ChirpRSetup.msi` install both succeed
+- Confirm `dist\chirpr-windows-x64\ChirpRSetup.exe` exists
+- Confirm `ChirpRSetup.exe` installs cleanly on a clean machine or VM
 - Confirm Start menu shortcuts are created after install
 - Confirm uninstall removes the app cleanly enough for the current release
+- Confirm autostart is enabled after install and removed on uninstall
 
 ## Release Artifacts
 
-- `dist\chirpr-windows-x64\ChirpRSetup.msi`
+- `dist\chirpr-windows-x64\ChirpRSetup.exe`
 - `dist\chirpr-windows-x64\chirpr.exe`
 - `dist\chirpr-windows-x64\chirpr-cli.exe`
-- `dist\chirpr-windows-x64\run-portable.cmd`
 - `dist\chirpr-windows-x64\config.toml`
 - `dist\chirpr-windows-x64\LICENSE`
 
