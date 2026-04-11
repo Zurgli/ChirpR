@@ -7,6 +7,7 @@ use regex::Regex;
 use serde::Deserialize;
 
 pub const DEFAULT_PRIMARY_SHORTCUT: &str = "ctrl+shift+space";
+pub const DEFAULT_RECORDING_MODE: &str = "toggle";
 pub const DEFAULT_STT_BACKEND: &str = "parakeet";
 pub const DEFAULT_PARAKEET_MODEL: &str = "nemo-parakeet-tdt-0.6b-v3";
 pub const DEFAULT_ONNX_PROVIDERS: &str = "cpu";
@@ -110,6 +111,7 @@ impl ProjectPaths {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChirpConfig {
     pub primary_shortcut: String,
+    pub recording_mode: String,
     pub stt_backend: String,
     pub parakeet_model: String,
     pub parakeet_quantization: Option<String>,
@@ -137,6 +139,7 @@ impl Default for ChirpConfig {
     fn default() -> Self {
         Self {
             primary_shortcut: DEFAULT_PRIMARY_SHORTCUT.to_string(),
+            recording_mode: DEFAULT_RECORDING_MODE.to_string(),
             stt_backend: DEFAULT_STT_BACKEND.to_string(),
             parakeet_model: DEFAULT_PARAKEET_MODEL.to_string(),
             parakeet_quantization: None,
@@ -191,6 +194,10 @@ impl ChirpConfig {
             primary_shortcut: raw
                 .primary_shortcut
                 .unwrap_or(defaults.primary_shortcut)
+                .to_ascii_lowercase(),
+            recording_mode: raw
+                .recording_mode
+                .unwrap_or(defaults.recording_mode)
                 .to_ascii_lowercase(),
             stt_backend: raw.stt_backend.unwrap_or(defaults.stt_backend),
             parakeet_model: raw.parakeet_model.unwrap_or(defaults.parakeet_model),
@@ -264,6 +271,13 @@ impl ChirpConfig {
             bail!(
                 "injection_mode must be 'type' or 'paste', got {:?}",
                 self.injection_mode
+            );
+        }
+
+        if self.recording_mode != "toggle" && self.recording_mode != "hold" {
+            bail!(
+                "recording_mode must be 'toggle' or 'hold', got {:?}",
+                self.recording_mode
             );
         }
 
@@ -380,6 +394,7 @@ fn looks_like_project_root(path: &Path) -> bool {
 #[derive(Debug, Deserialize)]
 struct RawConfig {
     primary_shortcut: Option<String>,
+    recording_mode: Option<String>,
     stt_backend: Option<String>,
     parakeet_model: Option<String>,
     parakeet_quantization: Option<String>,
@@ -434,6 +449,16 @@ mod tests {
         };
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("clipboard_clear_delay must be positive"));
+    }
+
+    #[test]
+    fn invalid_recording_mode_fails() {
+        let config = ChirpConfig {
+            recording_mode: "pulse".into(),
+            ..ChirpConfig::default()
+        };
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("recording_mode must be 'toggle' or 'hold'"));
     }
 
     #[test]
@@ -524,6 +549,7 @@ mod tests {
     fn raw_config_normalizes_keys() {
         let raw = RawConfig {
             primary_shortcut: Some("CTRL+SHIFT+SPACE".into()),
+            recording_mode: Some("Hold".into()),
             stt_backend: None,
             parakeet_model: None,
             parakeet_quantization: Some("INT8".into()),
@@ -549,6 +575,7 @@ mod tests {
 
         let config = ChirpConfig::from_raw(raw);
         assert_eq!(config.primary_shortcut, "ctrl+shift+space");
+        assert_eq!(config.recording_mode, "hold");
         assert_eq!(config.parakeet_quantization.as_deref(), Some("int8"));
         assert_eq!(config.onnx_providers, "cpu");
         assert_eq!(config.injection_mode, "paste");
@@ -561,6 +588,7 @@ mod tests {
     fn raw_config_preserves_negative_threads_for_validation() {
         let raw = RawConfig {
             primary_shortcut: None,
+            recording_mode: None,
             stt_backend: None,
             parakeet_model: None,
             parakeet_quantization: None,
@@ -595,7 +623,7 @@ mod tests {
         fs::create_dir_all(root.join("assets")).unwrap();
         fs::write(
             root.join("config.toml"),
-            "primary_shortcut = \"ctrl+shift+space\"\n",
+            "primary_shortcut = \"ctrl+shift+space\"\nrecording_mode = \"toggle\"\n",
         )
         .unwrap();
 
@@ -614,7 +642,7 @@ mod tests {
         fs::create_dir_all(root.join("assets")).unwrap();
         fs::write(
             root.join("config.toml"),
-            "primary_shortcut = \"ctrl+shift+space\"\n",
+            "primary_shortcut = \"ctrl+shift+space\"\nrecording_mode = \"toggle\"\n",
         )
         .unwrap();
 

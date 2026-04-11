@@ -11,6 +11,8 @@ use rdev::{Event, EventType};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum ShortcutKey {
     Control,
+    ControlLeft,
+    ControlRight,
     Shift,
     Alt,
     Meta,
@@ -28,7 +30,13 @@ pub struct KeyboardController {
 }
 
 pub struct KeyboardShortcutListener {
-    trigger_rx: Receiver<()>,
+    trigger_rx: Receiver<ShortcutEvent>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShortcutEvent {
+    Pressed,
+    Released,
 }
 
 impl KeyboardController {
@@ -178,6 +186,8 @@ fn wait_for_windows_shortcut_release(
         .iter()
         .flat_map(|key| match key {
             ShortcutKey::Control => vec![VK_LCONTROL, VK_RCONTROL, VK_CONTROL],
+            ShortcutKey::ControlLeft => vec![VK_LCONTROL],
+            ShortcutKey::ControlRight => vec![VK_RCONTROL],
             ShortcutKey::Shift => vec![VK_LSHIFT, VK_RSHIFT, VK_SHIFT],
             ShortcutKey::Alt => vec![VK_LMENU, VK_RMENU, VK_MENU],
             ShortcutKey::Meta => vec![VK_LWIN, VK_RWIN],
@@ -242,15 +252,15 @@ impl KeyboardShortcutListener {
         Ok(Self { trigger_rx })
     }
 
-    pub fn recv(&self) -> Result<()> {
+    pub fn recv(&self) -> Result<ShortcutEvent> {
         self.trigger_rx
             .recv()
             .context("keyboard listener disconnected")
     }
 
-    pub fn recv_timeout(&self, duration: Duration) -> Result<Option<()>> {
+    pub fn recv_timeout(&self, duration: Duration) -> Result<Option<ShortcutEvent>> {
         match self.trigger_rx.recv_timeout(duration) {
-            Ok(()) => Ok(Some(())),
+            Ok(event) => Ok(Some(event)),
             Err(RecvTimeoutError::Timeout) => Ok(None),
             Err(RecvTimeoutError::Disconnected) => {
                 anyhow::bail!("keyboard listener disconnected")
@@ -259,7 +269,7 @@ impl KeyboardShortcutListener {
     }
 }
 
-fn spawn_listener(required_keys: Vec<ShortcutKey>) -> Receiver<()> {
+fn spawn_listener(required_keys: Vec<ShortcutKey>) -> Receiver<ShortcutEvent> {
     let (tx, rx) = mpsc::channel();
     let state = Arc::new(Mutex::new(ListenerState {
         pressed: HashSet::new(),
@@ -279,13 +289,17 @@ fn spawn_listener(required_keys: Vec<ShortcutKey>) -> Receiver<()> {
                     state.pressed.insert(key);
                     if is_shortcut_active(&required_keys, &state.pressed) && !state.triggered {
                         state.triggered = true;
-                        let _ = tx.send(());
+                        let _ = tx.send(ShortcutEvent::Pressed);
                     }
                 }
                 EventType::KeyRelease(key) => {
+                    let was_triggered = state.triggered;
                     state.pressed.remove(&key);
                     if !is_shortcut_active(&required_keys, &state.pressed) {
                         state.triggered = false;
+                        if was_triggered {
+                            let _ = tx.send(ShortcutEvent::Released);
+                        }
                     }
                 }
                 _ => {}
@@ -317,6 +331,8 @@ fn parse_shortcut_part(part: &str) -> Result<ShortcutKey> {
     let normalized = part.to_ascii_lowercase();
     let key = match normalized.as_str() {
         "ctrl" | "control" => ShortcutKey::Control,
+        "lctrl" | "leftctrl" | "leftcontrol" => ShortcutKey::ControlLeft,
+        "rctrl" | "rightctrl" | "rightcontrol" => ShortcutKey::ControlRight,
         "shift" => ShortcutKey::Shift,
         "alt" => ShortcutKey::Alt,
         "win" | "meta" | "super" | "cmd" | "command" => ShortcutKey::Meta,
@@ -391,6 +407,8 @@ fn is_shortcut_active(required: &[ShortcutKey], pressed: &HashSet<rdev::Key>) ->
 fn shortcut_key_matches(required: &ShortcutKey, pressed: rdev::Key) -> bool {
     match required {
         ShortcutKey::Control => matches!(pressed, rdev::Key::ControlLeft | rdev::Key::ControlRight),
+        ShortcutKey::ControlLeft => pressed == rdev::Key::ControlLeft,
+        ShortcutKey::ControlRight => pressed == rdev::Key::ControlRight,
         ShortcutKey::Shift => matches!(pressed, rdev::Key::ShiftLeft | rdev::Key::ShiftRight),
         ShortcutKey::Alt => matches!(pressed, rdev::Key::Alt | rdev::Key::AltGr),
         ShortcutKey::Meta => matches!(pressed, rdev::Key::MetaLeft | rdev::Key::MetaRight),
@@ -433,6 +451,12 @@ mod tests {
     fn parses_modifier_only_shortcut() {
         let shortcut = parse_shortcut("ctrl+shift").unwrap();
         assert_eq!(shortcut, vec![ShortcutKey::Control, ShortcutKey::Shift]);
+    }
+
+    #[test]
+    fn parses_right_control_shortcut() {
+        let shortcut = parse_shortcut("rightctrl").unwrap();
+        assert_eq!(shortcut, vec![ShortcutKey::ControlRight]);
     }
 
     #[test]

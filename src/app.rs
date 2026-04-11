@@ -8,7 +8,7 @@ use tracing::{debug, error, info};
 use crate::audio::AudioBuffer;
 use crate::audio_feedback::AudioFeedback;
 use crate::config::{ChirpConfig, ProjectPaths};
-use crate::keyboard::{KeyboardController, KeyboardShortcutListener};
+use crate::keyboard::{KeyboardController, KeyboardShortcutListener, ShortcutEvent};
 use crate::recording::{ActiveRecording, CaptureSummary, MicrophoneRecorder};
 use crate::recording_overlay::RecordingOverlay;
 use crate::stt::parakeet::{ParakeetManager, ParakeetModelSpec};
@@ -79,21 +79,31 @@ impl ChirpApp {
     }
 
     pub fn run(&self) -> Result<()> {
-        info!(
-            "Chirp ready. Toggle recording with {}",
-            self.config.primary_shortcut
-        );
+        if self.config.recording_mode == "hold" {
+            info!(
+                "Chirp ready. Hold {} to record",
+                self.config.primary_shortcut
+            );
+        } else {
+            info!(
+                "Chirp ready. Toggle recording with {}",
+                self.config.primary_shortcut
+            );
+        }
 
         loop {
             if let Some(timeout) = self.recording_timeout_remaining()? {
-                match self.shortcut_listener.recv_timeout(timeout.min(HOUSEKEEPING_INTERVAL))? {
-                    Some(()) => self.toggle_recording()?,
+                match self
+                    .shortcut_listener
+                    .recv_timeout(timeout.min(HOUSEKEEPING_INTERVAL))?
+                {
+                    Some(event) => self.handle_shortcut_event(event)?,
                     None if timeout <= HOUSEKEEPING_INTERVAL => self.handle_timeout()?,
                     None => self.run_housekeeping()?,
                 }
             } else {
                 match self.shortcut_listener.recv_timeout(HOUSEKEEPING_INTERVAL)? {
-                    Some(()) => self.toggle_recording()?,
+                    Some(event) => self.handle_shortcut_event(event)?,
                     None => self.run_housekeeping()?,
                 }
             }
@@ -120,55 +130,98 @@ impl ChirpApp {
         Ok(())
     }
 
+    fn handle_shortcut_event(&self, event: ShortcutEvent) -> Result<()> {
+        if self.config.recording_mode == "hold" {
+            return match event {
+                ShortcutEvent::Pressed => self.start_recording(),
+                ShortcutEvent::Released => self.stop_recording_if_active(),
+            };
+        }
+
+        if event == ShortcutEvent::Pressed {
+            self.toggle_recording()?;
+        }
+
+        Ok(())
+    }
+
     fn toggle_recording(&self) -> Result<()> {
+        let is_recording = self
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("app state lock poisoned"))?
+            .active_recording
+            .is_some();
+
+        if is_recording {
+            self.stop_recording_if_active()
+        } else {
+            self.start_recording()
+        }
+    }
+
+    fn start_recording(&self) -> Result<()> {
         let mut state = self
             .state
             .lock()
             .map_err(|_| anyhow::anyhow!("app state lock poisoned"))?;
 
-        if state.active_recording.is_none() {
-            match MicrophoneRecorder::start_default() {
-                Ok(recording) => {
-                    state.active_recording = Some(recording);
-                    state.recording_started_at = Some(Instant::now());
-                    drop(state);
-                    self.spawn_model_prewarm();
-                    self.audio_feedback
-                        .play_start(self.config.start_sound_path.as_deref());
-                    if let Ok(overlay) = self.overlay.lock() {
-                        overlay.show("transcribing");
-                    }
-                    info!("Recording started");
-                }
-                Err(error) => {
-                    drop(state);
-                    self.audio_feedback
-                        .play_error(self.config.error_sound_path.as_deref());
-                    return Err(error);
-                }
-            }
-        } else {
-            let recording = state.active_recording.take().expect("recording present");
-            state.recording_started_at = None;
-            state.transcription_in_progress = true;
-            drop(state);
-            let model_ready = self
-                .parakeet
-                .lock()
-                .map(|manager| manager.is_loaded())
-                .unwrap_or(false);
-            if let Ok(overlay) = self.overlay.lock() {
-                if model_ready {
-                    overlay.show("transcribing");
-                } else {
-                    overlay.show("loading");
-                }
-            }
-            self.audio_feedback
-                .play_stop(self.config.stop_sound_path.as_deref());
-            self.spawn_transcription(recording);
-            info!("Recording stopped");
+        if state.active_recording.is_some() {
+            return Ok(());
         }
+
+        match MicrophoneRecorder::start_default() {
+            Ok(recording) => {
+                state.active_recording = Some(recording);
+                state.recording_started_at = Some(Instant::now());
+                drop(state);
+                self.spawn_model_prewarm();
+                self.audio_feedback
+                    .play_start(self.config.start_sound_path.as_deref());
+                if let Ok(overlay) = self.overlay.lock() {
+                    overlay.show("transcribing");
+                }
+                info!("Recording started");
+            }
+            Err(error) => {
+                drop(state);
+                self.audio_feedback
+                    .play_error(self.config.error_sound_path.as_deref());
+                return Err(error);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn stop_recording_if_active(&self) -> Result<()> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("app state lock poisoned"))?;
+        let Some(recording) = state.active_recording.take() else {
+            return Ok(());
+        };
+        state.recording_started_at = None;
+        state.transcription_in_progress = true;
+        drop(state);
+
+        let model_ready = self
+            .parakeet
+            .lock()
+            .map(|manager| manager.is_loaded())
+            .unwrap_or(false);
+        if let Ok(overlay) = self.overlay.lock() {
+            if model_ready {
+                overlay.show("transcribing");
+            } else {
+                overlay.show("loading");
+            }
+        }
+        self.audio_feedback
+            .play_stop(self.config.stop_sound_path.as_deref());
+        self.spawn_transcription(recording);
+        info!("Recording stopped");
 
         Ok(())
     }
@@ -279,7 +332,7 @@ impl ChirpApp {
 
     fn handle_timeout(&self) -> Result<()> {
         info!("Maximum recording duration reached.");
-        self.toggle_recording()
+        self.stop_recording_if_active()
     }
 }
 
