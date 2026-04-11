@@ -8,6 +8,7 @@ It is a Rust implementation of the original upstream `Whamp/chirp` workflow and 
 
 - Local speech-to-text with Parakeet ONNX models
 - Global hotkey dictation with `Ctrl+Shift+Space`
+- Optional hold-to-talk mode, including `rightctrl` as a right-Control-only shortcut
 - Paste injection by default for better Windows app compatibility
 - Optional typed injection with `injection_mode = "type"`
 - Recording overlay with audio start/stop/error feedback
@@ -24,6 +25,13 @@ Install with the NSIS package:
 ```
 
 After install or launch, use `Ctrl+Shift+Space` to start dictation.
+
+To make ChirpR record only while you hold the right Control key, set this in `config.toml`:
+
+```toml
+primary_shortcut = "rightctrl"
+recording_mode = "hold"
+```
 
 ## Development
 

@@ -1,4 +1,5 @@
-primary_shortcut = "ctrl+shift+space"         # Hotkey that toggles recording; any supported combination works (for example "ctrl+shift+space").
+primary_shortcut = "ctrl+shift+space"         # Global recording shortcut. Use "rightctrl" for right-Control only.
+recording_mode = "toggle"                     # "toggle" starts/stops on each shortcut press. "hold" records only while the shortcut is held down.
 stt_backend = "parakeet"                      # Only "parakeet" is implemented today, but keeping this key leaves room for future backends.
 parakeet_model = "nemo-parakeet-tdt-0.6b-v3"  # ONNX bundle name; keep as-is unless new packaged models are added.
 parakeet_quantization = "int8"                # Set to "int8" to use the quantized model variant; leave blank for the default model.
