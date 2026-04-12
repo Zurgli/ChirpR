@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use regex::Regex;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use toml_edit::{DocumentMut, Item, Table, Value, value};
 
 pub const DEFAULT_PRIMARY_SHORTCUT: &str = "ctrl+shift+space";
 pub const DEFAULT_RECORDING_MODE: &str = "toggle";
@@ -173,12 +174,61 @@ impl ChirpConfig {
                 paths.config_path.display()
             )
         })?;
-        let parsed: RawConfig = toml::from_str(&raw).with_context(|| {
-            format!("failed to parse TOML from {}", paths.config_path.display())
-        })?;
+        Self::from_toml_str(&raw)
+            .with_context(|| format!("failed to parse TOML from {}", paths.config_path.display()))
+    }
+
+    pub fn from_toml_str(raw: &str) -> Result<Self> {
+        let parsed: RawConfig = toml::from_str(raw)?;
         let config = Self::from_raw(parsed);
         config.validate()?;
         Ok(config)
+    }
+
+    pub fn validate_raw_toml(raw: &str) -> Result<Self> {
+        Self::from_toml_str(raw)
+    }
+
+    pub fn to_canonical_toml(&self) -> Result<String> {
+        self.validate()?;
+        let mut toml = toml::to_string_pretty(&SerializableConfig::from(self))
+            .context("failed to serialize config as TOML")?;
+        if !toml.ends_with('\n') {
+            toml.push('\n');
+        }
+        Ok(toml)
+    }
+
+    pub fn write_canonical(&self, path: &Path) -> Result<()> {
+        let toml = self.to_canonical_toml()?;
+        fs::write(path, toml)
+            .with_context(|| format!("failed to write config file at {}", path.display()))
+    }
+
+    /// Writes this config by updating values in the existing file so inline and header comments
+    /// stay attached to their keys. Falls back to [`Self::write_canonical`] when the file is
+    /// missing, empty, or not valid TOML.
+    pub fn write_merging_into_existing(&self, path: &Path) -> Result<()> {
+        self.validate()?;
+        if !path.is_file() {
+            return self.write_canonical(path);
+        }
+        let raw = fs::read_to_string(path)
+            .with_context(|| format!("failed to read config file at {}", path.display()))?;
+        if raw.trim().is_empty() {
+            return self.write_canonical(path);
+        }
+        let mut doc: DocumentMut = raw
+            .parse()
+            .with_context(|| format!("invalid TOML in {}", path.display()))?;
+        merge_chirp_config_into_document(&mut doc, self)?;
+        fs::write(path, doc.to_string()).with_context(|| {
+            format!(
+                "failed to write merged config file at {}",
+                path.display()
+            )
+        })?;
+        Ok(())
     }
 
     fn from_raw(raw: RawConfig) -> Self {
@@ -245,6 +295,10 @@ impl ChirpConfig {
     }
 
     pub fn validate(&self) -> Result<()> {
+        if self.stt_backend != "parakeet" {
+            bail!("stt_backend must be 'parakeet', got {:?}", self.stt_backend);
+        }
+
         if matches!(self.threads, Some(value) if value < 0) {
             bail!(
                 "threads must be non-negative, got {}",
@@ -327,12 +381,146 @@ impl ChirpConfig {
             );
         }
 
+        crate::stt::parakeet::ParakeetModelSpec::resolve(
+            &self.parakeet_model,
+            self.parakeet_quantization.as_deref(),
+        )?;
+
         validate_optional_path("start_sound_path", self.start_sound_path.as_deref())?;
         validate_optional_path("stop_sound_path", self.stop_sound_path.as_deref())?;
         validate_optional_path("error_sound_path", self.error_sound_path.as_deref())?;
 
         Ok(())
     }
+}
+
+fn merge_chirp_config_into_document(doc: &mut DocumentMut, config: &ChirpConfig) -> Result<()> {
+    set_root_value(doc, "primary_shortcut", config.primary_shortcut.as_str().into());
+    set_root_value(doc, "recording_mode", config.recording_mode.as_str().into());
+    set_root_value(doc, "stt_backend", config.stt_backend.as_str().into());
+    set_root_value(doc, "parakeet_model", config.parakeet_model.as_str().into());
+    set_root_value(
+        doc,
+        "parakeet_quantization",
+        config
+            .parakeet_quantization
+            .as_deref()
+            .unwrap_or_default()
+            .into(),
+    );
+    set_root_value(doc, "onnx_providers", config.onnx_providers.as_str().into());
+    match config.threads {
+        Some(t) => set_root_value(doc, "threads", i64::from(t).into()),
+        None => {
+            doc.remove("threads");
+        }
+    }
+    match config.language.as_deref() {
+        Some(lang) => set_root_value(doc, "language", lang.into()),
+        None => {
+            doc.remove("language");
+        }
+    }
+    set_root_value(doc, "post_processing", config.post_processing.as_str().into());
+    set_root_value(doc, "injection_mode", config.injection_mode.as_str().into());
+    set_root_value(doc, "paste_mode", config.paste_mode.as_str().into());
+    set_root_value(doc, "clipboard_behavior", config.clipboard_behavior.into());
+    set_root_value(
+        doc,
+        "clipboard_clear_delay",
+        f64::from(config.clipboard_clear_delay).into(),
+    );
+    set_root_value(doc, "model_timeout", f64::from(config.model_timeout).into());
+    set_root_value(doc, "audio_feedback", config.audio_feedback.into());
+    set_root_value(
+        doc,
+        "audio_feedback_volume",
+        f64::from(config.audio_feedback_volume).into(),
+    );
+    set_root_value(doc, "recording_overlay", config.recording_overlay.into());
+    set_root_value(doc, "overlay_indicator", config.overlay_indicator.as_str().into());
+    set_root_value(
+        doc,
+        "start_sound_path",
+        opt_path_toml(config.start_sound_path.as_deref()).into(),
+    );
+    set_root_value(
+        doc,
+        "stop_sound_path",
+        opt_path_toml(config.stop_sound_path.as_deref()).into(),
+    );
+    set_root_value(
+        doc,
+        "error_sound_path",
+        opt_path_toml(config.error_sound_path.as_deref()).into(),
+    );
+    set_root_value(
+        doc,
+        "max_recording_duration",
+        f64::from(config.max_recording_duration).into(),
+    );
+
+    merge_word_overrides_table(doc, &config.word_overrides)?;
+    Ok(())
+}
+
+/// Updates a root key’s logical value while keeping the existing value’s decoration (including
+/// end-of-line comments). Inserts the key if missing or if the existing entry is not a value.
+fn set_root_value(doc: &mut DocumentMut, key: &str, new_val: Value) {
+    if let Some(item) = doc.get_mut(key) {
+        if let Some(old_v) = item.as_value_mut() {
+            let decor = old_v.decor().clone();
+            *old_v = new_val;
+            *old_v.decor_mut() = decor;
+            return;
+        }
+    }
+    doc[key] = value(new_val);
+}
+
+/// Same as [`set_root_value`] for a normal TOML table (e.g. `[word_overrides]`).
+fn set_table_value(table: &mut Table, key: &str, new_val: Value) {
+    if let Some(item) = table.get_mut(key) {
+        if let Some(old_v) = item.as_value_mut() {
+            let decor = old_v.decor().clone();
+            *old_v = new_val;
+            *old_v.decor_mut() = decor;
+            return;
+        }
+    }
+    table.insert(key, value(new_val));
+}
+
+fn opt_path_toml(path: Option<&Path>) -> String {
+    path.map(|p| p.display().to_string())
+        .unwrap_or_default()
+}
+
+fn merge_word_overrides_table(
+    doc: &mut DocumentMut,
+    map: &BTreeMap<String, String>,
+) -> Result<()> {
+    if !doc.contains_table("word_overrides") {
+        doc["word_overrides"] = Item::Table(Table::new());
+    }
+    let table = doc["word_overrides"]
+        .as_table_mut()
+        .with_context(|| "word_overrides must be a TOML table")?;
+
+    let stale_keys: Vec<String> = table
+        .iter()
+        .map(|(key, _)| key.to_string())
+        .filter(|key| !map.contains_key(key))
+        .collect();
+    for key in stale_keys {
+        table.remove(&key);
+    }
+
+    for (key, replacement) in map {
+        set_table_value(table, key.as_str(), replacement.as_str().into());
+    }
+
+    Ok(())
 }
 
 fn validate_optional_path(name: &str, path: Option<&Path>) -> Result<()> {
@@ -416,6 +604,70 @@ struct RawConfig {
     stop_sound_path: Option<String>,
     error_sound_path: Option<String>,
     max_recording_duration: Option<f32>,
+}
+
+#[derive(Debug, Serialize)]
+struct SerializableConfig<'a> {
+    primary_shortcut: &'a str,
+    recording_mode: &'a str,
+    stt_backend: &'a str,
+    parakeet_model: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parakeet_quantization: Option<&'a str>,
+    onnx_providers: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    threads: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language: Option<&'a str>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    word_overrides: &'a BTreeMap<String, String>,
+    post_processing: &'a str,
+    injection_mode: &'a str,
+    paste_mode: &'a str,
+    clipboard_behavior: bool,
+    clipboard_clear_delay: f32,
+    model_timeout: f32,
+    audio_feedback: bool,
+    audio_feedback_volume: f32,
+    recording_overlay: bool,
+    overlay_indicator: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    start_sound_path: Option<&'a Path>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stop_sound_path: Option<&'a Path>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_sound_path: Option<&'a Path>,
+    max_recording_duration: f32,
+}
+
+impl<'a> From<&'a ChirpConfig> for SerializableConfig<'a> {
+    fn from(config: &'a ChirpConfig) -> Self {
+        Self {
+            primary_shortcut: &config.primary_shortcut,
+            recording_mode: &config.recording_mode,
+            stt_backend: &config.stt_backend,
+            parakeet_model: &config.parakeet_model,
+            parakeet_quantization: config.parakeet_quantization.as_deref(),
+            onnx_providers: &config.onnx_providers,
+            threads: config.threads,
+            language: config.language.as_deref(),
+            word_overrides: &config.word_overrides,
+            post_processing: &config.post_processing,
+            injection_mode: &config.injection_mode,
+            paste_mode: &config.paste_mode,
+            clipboard_behavior: config.clipboard_behavior,
+            clipboard_clear_delay: config.clipboard_clear_delay,
+            model_timeout: config.model_timeout,
+            audio_feedback: config.audio_feedback,
+            audio_feedback_volume: config.audio_feedback_volume,
+            recording_overlay: config.recording_overlay,
+            overlay_indicator: &config.overlay_indicator,
+            start_sound_path: config.start_sound_path.as_deref(),
+            stop_sound_path: config.stop_sound_path.as_deref(),
+            error_sound_path: config.error_sound_path.as_deref(),
+            max_recording_duration: config.max_recording_duration,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -618,6 +870,79 @@ mod tests {
     }
 
     #[test]
+    fn canonical_toml_round_trips_common_settings() {
+        let mut config = ChirpConfig {
+            primary_shortcut: "rightctrl".into(),
+            recording_mode: "hold".into(),
+            audio_feedback: false,
+            overlay_indicator: "dot".into(),
+            max_recording_duration: 12.5,
+            ..ChirpConfig::default()
+        };
+        config
+            .word_overrides
+            .insert("parra keat".into(), "parakeet".into());
+
+        let raw = config.to_canonical_toml().unwrap();
+        let reparsed = ChirpConfig::from_toml_str(&raw).unwrap();
+
+        assert_eq!(reparsed, config);
+        assert!(raw.contains("primary_shortcut = \"rightctrl\""));
+        assert!(raw.contains("recording_mode = \"hold\""));
+    }
+
+    #[test]
+    fn raw_toml_validation_reports_parse_errors() {
+        let error = ChirpConfig::validate_raw_toml("primary_shortcut = [")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("TOML parse error"));
+    }
+
+    #[test]
+    fn canonical_toml_skips_empty_optional_paths() {
+        let config = ChirpConfig::default();
+        let raw = config.to_canonical_toml().unwrap();
+        assert!(!raw.contains("start_sound_path"));
+        assert!(!raw.contains("stop_sound_path"));
+        assert!(!raw.contains("error_sound_path"));
+    }
+
+    #[test]
+    fn canonical_toml_serializes_sound_paths() {
+        let root = unique_temp_dir("config-sound");
+        fs::create_dir_all(&root).unwrap();
+        let sound_path = root.join("ding.wav");
+        fs::write(&sound_path, "tone").unwrap();
+
+        let config = ChirpConfig {
+            start_sound_path: Some(sound_path.clone()),
+            ..ChirpConfig::default()
+        };
+
+        let raw = config.to_canonical_toml().unwrap();
+        assert!(raw.contains("start_sound_path"));
+        assert!(raw.contains(&sound_path.display().to_string()));
+    }
+
+    #[test]
+    fn canonical_write_persists_word_overrides() {
+        let root = unique_temp_dir("config-write");
+        fs::create_dir_all(&root).unwrap();
+        let config_path = root.join("config.toml");
+
+        let mut config = ChirpConfig::default();
+        config
+            .word_overrides
+            .insert("parra keat".into(), "parakeet".into());
+        config.write_canonical(&config_path).unwrap();
+
+        let written = fs::read_to_string(&config_path).unwrap();
+        assert!(written.contains("[word_overrides]"));
+        assert!(written.contains("\"parra keat\" = \"parakeet\""));
+    }
+
+    #[test]
     fn discover_prefers_executable_ancestor_when_cwd_is_wrong() {
         let root = unique_temp_dir("discover-exe");
         fs::create_dir_all(root.join("assets")).unwrap();
@@ -652,5 +977,46 @@ mod tests {
         );
 
         assert_eq!(discovered.project_root, root);
+    }
+
+    #[test]
+    fn merge_write_preserves_inline_comments_in_repo_config() {
+        let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("config.toml");
+        if !src.is_file() {
+            return;
+        }
+        let raw = fs::read_to_string(&src).unwrap();
+        let hashes_before = raw.matches('#').count();
+        let inline_marker = "Global recording shortcut";
+        let block_marker = "Word overrides map spoken";
+        assert!(
+            raw.contains(inline_marker),
+            "repo config.toml should contain `{inline_marker}` for this regression test"
+        );
+        assert!(
+            raw.contains(block_marker),
+            "repo config.toml should contain `{block_marker}` for this regression test"
+        );
+
+        let config = ChirpConfig::from_toml_str(&raw).unwrap();
+        let dir = unique_temp_dir("merge-comments");
+        fs::create_dir_all(&dir).unwrap();
+        let dst = dir.join("config.toml");
+        fs::write(&dst, &raw).unwrap();
+        config.write_merging_into_existing(&dst).unwrap();
+        let out = fs::read_to_string(&dst).unwrap();
+        let hashes_after = out.matches('#').count();
+        assert!(
+            out.contains(inline_marker),
+            "expected inline comment text preserved; output:\n{out}"
+        );
+        assert!(
+            out.contains(block_marker),
+            "expected full-line comment before [word_overrides] preserved; output:\n{out}"
+        );
+        assert_eq!(
+            hashes_before, hashes_after,
+            "hash/comment count changed: before {hashes_before} after {hashes_after}"
+        );
     }
 }

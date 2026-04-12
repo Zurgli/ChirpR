@@ -193,11 +193,7 @@ impl ParakeetModelSpec {
         model_dir: &Path,
         timeout: Option<Duration>,
     ) -> Result<ParakeetManager> {
-        ParakeetManager::new(
-            model_dir.to_path_buf(),
-            self.clone(),
-            timeout,
-        )
+        ParakeetManager::new(model_dir.to_path_buf(), self.clone(), timeout)
     }
 
     fn encoder_file_name(&self) -> &'static str {

@@ -3,11 +3,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Clone, Parser)]
-#[command(
-    name = "chirpr-cli",
-    version,
-    about = "CLI for ChirpR local dictation"
-)]
+#[command(name = "chirpr-cli", version, about = "CLI for ChirpR local dictation")]
 pub struct Cli {
     #[arg(short, long, global = true)]
     pub verbose: bool,

@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ChirpR Settings</title>
+  <style>__CHIRPR_SETTINGS_CSS__</style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="top-bar">
+      <div class="top-bar__left">
+        <div class="top-bar__title">
+          <span class="brand">ChirpR</span>
+          <span class="slash">/</span>
+          <span>Settings</span>
+        </div>
+      </div>
+      <div class="top-bar__right">
+        <div class="top-bar__actions">
+          <button class="secondary-button" id="cancelButton" type="button">Cancel</button>
+          <button class="primary-button" id="saveButton" type="button">Save</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="main-grid">
+      <aside class="sidebar">
+        <nav class="tab-nav">
+          <button class="tab-button is-active" data-tab-button="general" type="button">General</button>
+          <button class="tab-button" data-tab-button="advanced" type="button">Advanced</button>
+          <button class="tab-button" data-tab-button="raw" type="button">Raw TOML</button>
+        </nav>
+      </aside>
+
+      <section class="content-panel">
+        <div class="banner hidden" id="startup-warning"></div>
+        <div class="banner banner-error hidden" id="structured-error"></div>
+
+        <section class="tab-panel is-active" data-tab-panel="general">
+          <div class="panel-card">
+            <h2 class="card-title">General</h2>
+            <div class="field-grid">
+              <label class="field">
+                <span>Primary Shortcut</span>
+                <div class="field-input-with-help">
+                  <input id="primaryShortcut" type="text" spellcheck="false">
+                  <button type="button" class="field-help-btn field-help-btn--in-input" aria-label="Shortcut syntax. Key names separated by plus. Examples: rightctrl, ctrl+shift+space, win+v" title="Key names separated by +.&#10;&#10;Examples:&#10;rightctrl&#10;ctrl+shift+space&#10;win+v">?</button>
+                </div>
+              </label>
+
+              <label class="field">
+                <span>Recording Mode</span>
+                <select id="recordingMode">
+                  <option value="toggle">toggle</option>
+                  <option value="hold">hold</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Injection Mode</span>
+                <select id="injectionMode">
+                  <option value="paste">paste</option>
+                  <option value="type">type</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Paste Mode</span>
+                <select id="pasteMode">
+                  <option value="ctrl">ctrl</option>
+                  <option value="ctrl+shift">ctrl+shift</option>
+                </select>
+              </label>
+
+              <label class="field field-checkbox">
+                <span>Clipboard staging before injection</span>
+                <input id="clipboardBehavior" type="checkbox">
+              </label>
+
+              <label class="field">
+                <span>Clipboard Clear Delay</span>
+                <input id="clipboardClearDelay" type="text" inputmode="decimal">
+              </label>
+
+              <label class="field field-checkbox">
+                <span>Audio feedback</span>
+                <input id="audioFeedback" type="checkbox">
+              </label>
+
+              <label class="field">
+                <span>Audio Feedback Volume</span>
+                <input id="audioFeedbackVolume" type="text" inputmode="decimal">
+              </label>
+
+              <label class="field field-checkbox">
+                <span>Recording overlay</span>
+                <input id="recordingOverlay" type="checkbox">
+              </label>
+
+              <label class="field">
+                <span>Overlay Indicator</span>
+                <div class="overlay-indicator-control">
+                  <div class="overlay-indicator-preview" id="overlayIndicatorPreview" data-style="sine_eye_double" title="Indicator preview">
+                    <svg viewBox="0 0 36 16" data-preview="dot" aria-hidden="true">
+                      <circle cx="18" cy="8" r="5" fill="#e4543f"/>
+                    </svg>
+                    <svg viewBox="0 0 36 16" data-preview="halo_soft" aria-hidden="true">
+                      <circle cx="18" cy="8" r="9" fill="none" stroke="rgba(236, 84, 67, 0.45)" stroke-width="1.25"/>
+                      <circle cx="18" cy="8" r="3.5" fill="#e4543f"/>
+                    </svg>
+                    <svg viewBox="0 0 36 14" data-preview="sine_eye_double" aria-hidden="true">
+                      <path fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                      <path fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </div>
+                  <select id="overlayIndicator">
+                    <option value="sine_eye_double">sine_eye_double</option>
+                    <option value="halo_soft">halo_soft</option>
+                    <option value="dot">dot</option>
+                  </select>
+                </div>
+              </label>
+
+              <label class="field">
+                <span>Max Recording Duration</span>
+                <input id="maxRecordingDuration" type="text" inputmode="decimal">
+              </label>
+
+              <label class="field">
+                <span>Language</span>
+                <input id="language" type="text" spellcheck="false">
+              </label>
+            </div>
+          </div>
+
+          <div class="panel-card">
+            <div class="card-title-row">
+              <h2 class="card-title">Word Overrides</h2>
+              <button class="secondary-button" id="addWordOverride" type="button">Add</button>
+            </div>
+            <p class="card-micro">Fill Spoken before adding another row. Empty replacement removes the spoken phrase.</p>
+            <div class="word-overrides-wrap">
+              <table class="word-overrides-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Spoken</th>
+                    <th scope="col">Replacement</th>
+                    <th class="word-overrides-col-actions" scope="col"><span class="visually-hidden">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody id="wordOverrides"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="panel-card">
+            <h2 class="card-title">Sounds</h2>
+            <p class="card-micro">Leave a path empty to use the default for that sound (bundled WAV for start/stop; system beep for error).</p>
+            <div class="sound-grid">
+              <div class="field sound-field">
+                <span>Start</span>
+                <div class="path-input path-input--sound">
+                  <input id="startSoundPath" type="text" spellcheck="false" placeholder="Empty: default start sound" title="Empty uses bundled ping-up.wav">
+                  <button class="secondary-button sound-preview-btn" type="button" data-sound-field="startSoundPath" data-sound-role="start" aria-label="Preview start sound" title="Preview">▶</button>
+                  <button class="secondary-button browse-button" data-browse-field="startSoundPath" type="button">…</button>
+                </div>
+              </div>
+              <div class="field sound-field">
+                <span>Stop</span>
+                <div class="path-input path-input--sound">
+                  <input id="stopSoundPath" type="text" spellcheck="false" placeholder="Empty: default stop sound" title="Empty uses bundled ping-down.wav">
+                  <button class="secondary-button sound-preview-btn" type="button" data-sound-field="stopSoundPath" data-sound-role="stop" aria-label="Preview stop sound" title="Preview">▶</button>
+                  <button class="secondary-button browse-button" data-browse-field="stopSoundPath" type="button">…</button>
+                </div>
+              </div>
+              <div class="field sound-field">
+                <span>Error</span>
+                <div class="path-input path-input--sound">
+                  <input id="errorSoundPath" type="text" spellcheck="false" placeholder="Empty: system error beep" title="Empty uses Windows error beep">
+                  <button class="secondary-button sound-preview-btn" type="button" data-sound-field="errorSoundPath" data-sound-role="error" aria-label="Preview error sound" title="Preview">▶</button>
+                  <button class="secondary-button browse-button" data-browse-field="errorSoundPath" type="button">…</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="tab-panel" data-tab-panel="advanced">
+          <div class="panel-card">
+            <h2 class="card-title">Model &amp; runtime</h2>
+            <div class="field-grid">
+              <label class="field">
+                <span>STT Backend</span>
+                <select id="sttBackend">
+                  <option value="parakeet">parakeet</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Parakeet Model</span>
+                <input id="parakeetModel" type="text" spellcheck="false">
+              </label>
+
+              <label class="field">
+                <span>Quantization</span>
+                <select id="parakeetQuantization">
+                  <option value="">default</option>
+                  <option value="int8">int8</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>ONNX Providers</span>
+                <input id="onnxProviders" type="text" spellcheck="false">
+              </label>
+
+              <label class="field">
+                <span>Threads</span>
+                <input id="threads" type="text" inputmode="numeric">
+              </label>
+
+              <label class="field">
+                <span>Model Timeout</span>
+                <input id="modelTimeout" type="text" inputmode="decimal">
+              </label>
+            </div>
+          </div>
+
+          <div class="panel-card">
+            <h2 class="card-title">Post processing</h2>
+            <div class="post-processing-instructions">
+              <p>Runs after word overrides and punctuation cleanup. One rule per non-empty line. Only one casing mode is used; if you list several, the last one wins.</p>
+              <ul>
+                <li><code>sentence case</code>, <code>sentence-case</code>, or <code>capitalize sentences</code> — sentence-style capitals</li>
+                <li><code>uppercase</code> or <code>upper</code> — whole text</li>
+                <li><code>lowercase</code> or <code>lower</code> — whole text</li>
+                <li><code>prepend:</code> then text after the colon — inserted before the transcript</li>
+                <li><code>append:</code> then text after the colon — inserted after the transcript</li>
+              </ul>
+            </div>
+            <div class="post-processing-rules-row">
+              <label class="post-processing-rules">
+                <span class="post-processing-rules__label">Rules</span>
+                <textarea id="postProcessing" rows="4" spellcheck="false" placeholder="sentence case&#10;append: —draft"></textarea>
+              </label>
+            </div>
+          </div>
+
+          <div class="panel-card">
+            <h2 class="card-title">Model status</h2>
+            <pre id="modelStatus" class="status-block"></pre>
+          </div>
+        </section>
+
+        <section class="tab-panel" data-tab-panel="raw">
+          <div class="panel-card panel-card--fill">
+            <h2 class="card-title">Raw TOML</h2>
+            <div class="banner banner-error hidden" id="raw-error"></div>
+            <textarea id="rawToml" class="raw-editor" spellcheck="false"></textarea>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <script>__CHIRPR_SETTINGS_JS__</script>
+</body>
+</html>
