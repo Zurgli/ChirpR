@@ -1,5 +1,5 @@
-primary_shortcut = "ctrl+shift+space"         # Global recording shortcut. Use "rightctrl" for right-Control only.
-recording_mode = "toggle"                     # "toggle" starts/stops on each shortcut press. "hold" records only while the shortcut is held down.
+primary_shortcut = "rightctrl"                # Global recording shortcut. Use "rightctrl" for right-Control only.
+recording_mode = "hold"                       # "toggle" starts/stops on each shortcut press. "hold" records only while the shortcut is held down.
 stt_backend = "parakeet"                      # Only "parakeet" is implemented today, but keeping this key leaves room for future backends.
 parakeet_model = "nemo-parakeet-tdt-0.6b-v3"  # ONNX bundle name; keep as-is unless new packaged models are added.
 parakeet_quantization = "int8"                # Set to "int8" to use the quantized model variant; leave blank for the default model.
@@ -19,11 +19,11 @@ overlay_indicator = "sine_eye_double"         # Overlay indicator style: "dot", 
 start_sound_path = ""                         # Leave blank to use the bundled start chirp in assets/sounds/ping-up.wav.
 stop_sound_path = ""                          # Leave blank to use the bundled stop chirp in assets/sounds/ping-down.wav.
 error_sound_path = ""                         # Leave blank to use the default system error beep.
-max_recording_duration = 45.0                 # Automatically stop recording after this many seconds (default: 45s).
+max_recording_duration = 90.0                 # Automatically stop recording after this many seconds (default: 45s).
 
 # Word overrides map spoken tokens (case-insensitive) to replacement text.
 [word_overrides]
-um = ""
-uh = ""
-parrakeat = "parakeet"
 "parra keat" = "parakeet"
+parrakeat = "parakeet"
+uh = ""
+um = ""
