@@ -670,7 +670,7 @@ mod windows_impl {
     fn build_html(assets: &super::SettingsUiAssets) -> String {
         assets
             .html
-            .replace("__CHIRPR_SETTINGS_CSS__", &assets.css)
+            .replace("/*__CHIRPR_SETTINGS_CSS__*/", &assets.css)
             .replace("__CHIRPR_SETTINGS_JS__", &assets.js)
     }
 
