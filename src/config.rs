@@ -295,7 +295,7 @@ impl ChirpConfig {
     }
 
     pub fn validate(&self) -> Result<()> {
-        if self.stt_backend != "parakeet" {
+        if !self.stt_backend.eq_ignore_ascii_case("parakeet") {
             bail!("stt_backend must be 'parakeet', got {:?}", self.stt_backend);
         }
 
