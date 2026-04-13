@@ -110,7 +110,6 @@ pub fn focus_window_by_class(class_name: &str) -> Result<bool> {
         if IsIconic(hwnd) != 0 {
             ShowWindow(hwnd, SW_RESTORE);
         }
-        ShowWindow(hwnd, SW_RESTORE);
         let _ = SetForegroundWindow(hwnd);
     }
 
@@ -139,7 +138,6 @@ pub fn focus_window_by_title(window_title: &str) -> Result<bool> {
         if IsIconic(hwnd) != 0 {
             ShowWindow(hwnd, SW_RESTORE);
         }
-        ShowWindow(hwnd, SW_RESTORE);
         let _ = SetForegroundWindow(hwnd);
     }
 
