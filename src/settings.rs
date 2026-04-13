@@ -241,6 +241,14 @@ impl StructuredSettings {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum SoundField {
+    StartSoundPath,
+    StopSoundPath,
+    ErrorSoundPath,
+}
+
 fn normalize_string(value: String) -> Option<String> {
     let trimmed = value.trim().to_string();
     if trimmed.is_empty() {
@@ -418,7 +426,7 @@ mod windows_impl {
     enum IpcRequestPayload {
         SaveStructured { form: StructuredSettings },
         SaveRaw { raw: String },
-        BrowseSound { field: String },
+        BrowseSound { field: SoundField },
         PreviewSound { role: String, path: String },
         RefreshModelStatus { form: StructuredSettings },
         CloseWindow,
@@ -432,7 +440,7 @@ mod windows_impl {
     #[derive(serde::Serialize)]
     #[serde(tag = "kind", rename_all = "snake_case")]
     enum UiResponse {
-        ReplaceSoundPath { field: String, value: String },
+        ReplaceSoundPath { field: SoundField, value: String },
         UpdateModelStatus { message: String },
         SetStructuredError { message: String },
         SetRawError { message: String },
@@ -910,5 +918,24 @@ recording_mode = "toggle"  # recording comment
         let message = model_status_message(&paths, &ChirpConfig::default()).unwrap();
         assert!(message.contains("missing"));
         assert!(message.contains("chirpr-cli setup"));
+    }
+
+    #[test]
+    fn sound_field_only_accepts_known_dom_ids() {
+        let payload: IpcRequestPayload =
+            serde_json::from_str(r#"{"kind":"browse_sound","field":"startSoundPath"}"#).unwrap();
+        match payload {
+            IpcRequestPayload::BrowseSound { field } => {
+                assert_eq!(field, SoundField::StartSoundPath);
+            }
+            _ => panic!("expected browse_sound payload"),
+        }
+
+        let error = serde_json::from_str::<IpcRequestPayload>(
+            r#"{"kind":"browse_sound","field":"unexpectedField"}"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("unknown variant"));
     }
 }
