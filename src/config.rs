@@ -500,7 +500,11 @@ fn merge_word_overrides_table(
     doc: &mut DocumentMut,
     map: &BTreeMap<String, String>,
 ) -> Result<()> {
-    if !doc.contains_table("word_overrides") {
+    if doc.contains_key("word_overrides") {
+        if !doc.contains_table("word_overrides") {
+            bail!("word_overrides in config is not a TOML table; cannot merge settings");
+        }
+    } else {
         doc["word_overrides"] = Item::Table(Table::new());
     }
     let table = doc["word_overrides"]
