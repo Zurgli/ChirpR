@@ -41,7 +41,7 @@ pub fn try_acquire_named_mutex(name: &str) -> Result<Option<WindowsMutexGuard>> 
         // mutex; otherwise it may leave a stale code from an unrelated prior API call. Without
         // clearing first, we can falsely close a brand-new handle and never acquire the mutex.
         unsafe { SetLastError(0) };
-        let handle = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
+        let handle = unsafe { CreateMutexW(std::ptr::null(), 1, name.as_ptr()) };
         if handle.is_null() {
             bail!("failed to create Windows mutex");
         }
