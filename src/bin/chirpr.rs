@@ -12,6 +12,9 @@ struct LauncherCli {
 
     #[arg(long)]
     config: Option<std::path::PathBuf>,
+
+    #[arg(long)]
+    settings: bool,
 }
 
 fn main() {
@@ -44,5 +47,32 @@ fn run() -> anyhow::Result<()> {
     if let Some(config_path) = cli.config {
         paths = paths.with_config_path(config_path);
     }
-    chirp_rust::run_background_app(paths)
+    if cli.settings {
+        chirp_rust::settings::run(paths)
+    } else {
+        chirp_rust::run_background_app(paths)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LauncherCli;
+    use clap::Parser;
+
+    #[test]
+    fn parses_settings_flag() {
+        let cli = LauncherCli::parse_from(["chirpr", "--settings"]);
+        assert!(cli.settings);
+        assert!(!cli.verbose);
+    }
+
+    #[test]
+    fn parses_settings_with_config_path() {
+        let cli = LauncherCli::parse_from(["chirpr", "--settings", "--config", "custom.toml"]);
+        assert!(cli.settings);
+        assert_eq!(
+            cli.config.as_deref(),
+            Some(std::path::Path::new("custom.toml"))
+        );
+    }
 }

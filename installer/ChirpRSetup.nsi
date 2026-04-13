@@ -34,6 +34,7 @@ Section "Install"
     
     File "${DIST_PATH}\chirpr.exe"
     File "${DIST_PATH}\chirpr-cli.exe"
+    IfFileExists "$INSTDIR\config.toml" +2 0
     File "${DIST_PATH}\config.toml"
     File "${DIST_PATH}\LICENSE"
     
@@ -51,6 +52,7 @@ Section "Install"
     
     CreateDirectory "$SMPROGRAMS\ChirpR"
     CreateShortCut "$SMPROGRAMS\ChirpR\ChirpR.lnk" "$INSTDIR\chirpr.exe"
+    CreateShortCut "$SMPROGRAMS\ChirpR\ChirpR Settings.lnk" "$INSTDIR\chirpr.exe" "--settings"
     CreateShortCut "$SMPROGRAMS\ChirpR\Uninstall ChirpR.lnk" "$INSTDIR\uninstall.exe"
     
     WriteUninstaller "$INSTDIR\uninstall.exe"
@@ -68,6 +70,7 @@ Section "Uninstall"
     RMDir "$INSTDIR"
     
     Delete "$SMPROGRAMS\ChirpR\ChirpR.lnk"
+    Delete "$SMPROGRAMS\ChirpR\ChirpR Settings.lnk"
     Delete "$SMPROGRAMS\ChirpR\Uninstall ChirpR.lnk"
     RMDir "$SMPROGRAMS\ChirpR"
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "ChirpRust"

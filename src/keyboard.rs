@@ -269,6 +269,11 @@ impl KeyboardShortcutListener {
     }
 }
 
+pub fn canonicalize_shortcut(shortcut: &str) -> Result<String> {
+    let parsed = parse_shortcut(shortcut)?;
+    Ok(format_shortcut(&parsed))
+}
+
 fn spawn_listener(required_keys: Vec<ShortcutKey>) -> Receiver<ShortcutEvent> {
     let (tx, rx) = mpsc::channel();
     let state = Arc::new(Mutex::new(ListenerState {
@@ -443,6 +448,74 @@ fn parse_send_combination(combination: &str) -> Result<Vec<Key>> {
         .collect()
 }
 
+fn format_shortcut(parts: &[ShortcutKey]) -> String {
+    parts
+        .iter()
+        .map(|part| match part {
+            ShortcutKey::Control => "ctrl".to_string(),
+            ShortcutKey::ControlLeft => "leftctrl".to_string(),
+            ShortcutKey::ControlRight => "rightctrl".to_string(),
+            ShortcutKey::Shift => "shift".to_string(),
+            ShortcutKey::Alt => "alt".to_string(),
+            ShortcutKey::Meta => "win".to_string(),
+            ShortcutKey::Named(key) => format_named_key(*key),
+        })
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
+fn format_named_key(key: rdev::Key) -> String {
+    match key {
+        rdev::Key::Space => "space".into(),
+        rdev::Key::Return => "enter".into(),
+        rdev::Key::Tab => "tab".into(),
+        rdev::Key::Escape => "escape".into(),
+        rdev::Key::Backspace => "backspace".into(),
+        rdev::Key::Delete => "delete".into(),
+        rdev::Key::UpArrow => "up".into(),
+        rdev::Key::DownArrow => "down".into(),
+        rdev::Key::LeftArrow => "left".into(),
+        rdev::Key::RightArrow => "right".into(),
+        rdev::Key::KeyA => "a".into(),
+        rdev::Key::KeyB => "b".into(),
+        rdev::Key::KeyC => "c".into(),
+        rdev::Key::KeyD => "d".into(),
+        rdev::Key::KeyE => "e".into(),
+        rdev::Key::KeyF => "f".into(),
+        rdev::Key::KeyG => "g".into(),
+        rdev::Key::KeyH => "h".into(),
+        rdev::Key::KeyI => "i".into(),
+        rdev::Key::KeyJ => "j".into(),
+        rdev::Key::KeyK => "k".into(),
+        rdev::Key::KeyL => "l".into(),
+        rdev::Key::KeyM => "m".into(),
+        rdev::Key::KeyN => "n".into(),
+        rdev::Key::KeyO => "o".into(),
+        rdev::Key::KeyP => "p".into(),
+        rdev::Key::KeyQ => "q".into(),
+        rdev::Key::KeyR => "r".into(),
+        rdev::Key::KeyS => "s".into(),
+        rdev::Key::KeyT => "t".into(),
+        rdev::Key::KeyU => "u".into(),
+        rdev::Key::KeyV => "v".into(),
+        rdev::Key::KeyW => "w".into(),
+        rdev::Key::KeyX => "x".into(),
+        rdev::Key::KeyY => "y".into(),
+        rdev::Key::KeyZ => "z".into(),
+        rdev::Key::Num0 => "0".into(),
+        rdev::Key::Num1 => "1".into(),
+        rdev::Key::Num2 => "2".into(),
+        rdev::Key::Num3 => "3".into(),
+        rdev::Key::Num4 => "4".into(),
+        rdev::Key::Num5 => "5".into(),
+        rdev::Key::Num6 => "6".into(),
+        rdev::Key::Num7 => "7".into(),
+        rdev::Key::Num8 => "8".into(),
+        rdev::Key::Num9 => "9".into(),
+        other => format!("{other:?}").to_ascii_lowercase(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -476,5 +549,11 @@ mod tests {
     fn send_combination_supports_paste_shortcuts() {
         let keys = parse_send_combination("ctrl+shift+v").unwrap();
         assert_eq!(keys, vec![Key::Control, Key::Shift, Key::Unicode('v')]);
+    }
+
+    #[test]
+    fn canonicalizes_right_control_shortcut() {
+        let shortcut = canonicalize_shortcut("RightCtrl").unwrap();
+        assert_eq!(shortcut, "rightctrl");
     }
 }

@@ -16,10 +16,11 @@ use windows_sys::Win32::Graphics::GdiPlus::{
     CompositingQualityHighQuality, FillModeAlternate, GdipAddPathArc, GdipAddPathLine,
     GdipClosePathFigure, GdipCreateFromHDC, GdipCreatePath, GdipCreatePen1, GdipCreateSolidFill,
     GdipDeleteBrush, GdipDeleteGraphics, GdipDeletePath, GdipDeletePen, GdipDrawEllipseI,
-    GdipDrawLineI, GdipDrawPath, GdipFillEllipseI, GdipFillPath, GdipGraphicsClear, GdipSetCompositingQuality,
-    GdipSetPixelOffsetMode, GdipSetSmoothingMode, GdipSetTextRenderingHint, GdiplusStartup,
-    GdiplusStartupInput, GpBrush, GpGraphics, GpPath, GpPen, LineJoinRound, PixelOffsetModeHalf,
-    SmoothingModeAntiAlias, TextRenderingHintClearTypeGridFit, UnitPixel,
+    GdipDrawLineI, GdipDrawPath, GdipFillEllipseI, GdipFillPath, GdipGraphicsClear,
+    GdipSetCompositingQuality, GdipSetPixelOffsetMode, GdipSetSmoothingMode,
+    GdipSetTextRenderingHint, GdiplusStartup, GdiplusStartupInput, GpBrush, GpGraphics, GpPath,
+    GpPen, LineJoinRound, PixelOffsetModeHalf, SmoothingModeAntiAlias,
+    TextRenderingHintClearTypeGridFit, UnitPixel,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::{
@@ -481,12 +482,7 @@ fn paint_overlay_antialiased(
                 && GdipDrawPath(graphics, pen, path) == 0;
         }
         if ok {
-            ok = draw_indicator_antialiased(
-                graphics,
-                indicator_metrics,
-                &mut indicator_brush,
-                pen,
-            );
+            ok = draw_indicator_antialiased(graphics, indicator_metrics, &mut indicator_brush, pen);
         }
 
         if !indicator_brush.is_null() {
@@ -822,12 +818,7 @@ fn draw_sine_eye_double_antialiased(
 
         let _ = windows_sys::Win32::Graphics::GdiPlus::GdipSetPenColor(
             pen,
-            argb(
-                (110.0 + indicator.phase * 130.0).round() as u8,
-                228,
-                82,
-                63,
-            ),
+            argb((110.0 + indicator.phase * 130.0).round() as u8, 228, 82, 63),
         );
         let _ = windows_sys::Win32::Graphics::GdiPlus::GdipSetPenWidth(pen, stroke_width);
 
@@ -871,12 +862,8 @@ fn draw_sine_eye_double_gdi(
     unsafe {
         let points = sine_trace_points(indicator, phase_offset);
         if let Some((first_x, first_y)) = points.first().copied() {
-            let _ = windows_sys::Win32::Graphics::Gdi::MoveToEx(
-                hdc,
-                first_x,
-                first_y,
-                ptr::null_mut(),
-            );
+            let _ =
+                windows_sys::Win32::Graphics::Gdi::MoveToEx(hdc, first_x, first_y, ptr::null_mut());
             for (x, y) in points.iter().copied().skip(1) {
                 let _ = windows_sys::Win32::Graphics::Gdi::LineTo(hdc, x, y);
             }

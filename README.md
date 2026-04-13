@@ -11,6 +11,7 @@ It is a Rust implementation of the original upstream `Whamp/chirp` workflow and 
 - Optional hold-to-talk mode, including `rightctrl` as a right-Control-only shortcut
 - Paste injection by default for better Windows app compatibility
 - Optional typed injection with `injection_mode = "type"`
+- Native settings window via `chirpr.exe --settings` or the `ChirpR Settings` Start menu shortcut
 - Recording overlay with audio start/stop/error feedback
 - Idle model unload and background model prewarm
 - NSIS-based Windows installer
@@ -25,6 +26,12 @@ Install with the NSIS package:
 ```
 
 After install or launch, use `Ctrl+Shift+Space` to start dictation.
+
+To open the settings window, launch `ChirpR Settings` from the Start menu or run:
+
+```powershell
+.\chirpr.exe --settings
+```
 
 To make ChirpR record only while you hold the right Control key, set this in `config.toml`:
 
@@ -83,6 +90,7 @@ Disable autostart after install if needed:
 The installed app creates Start menu shortcuts for:
 
 - `ChirpR`
+- `ChirpR Settings`
 - `Uninstall ChirpR`
 
 ## Logging And Models

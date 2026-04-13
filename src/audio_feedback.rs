@@ -23,41 +23,62 @@ impl AudioFeedback {
     }
 
     pub fn play_start(&self, override_path: Option<&Path>) {
-        self.play_optional_sound("ping-up.wav", override_path);
+        let _ = self.try_play_start(override_path);
     }
 
     pub fn play_stop(&self, override_path: Option<&Path>) {
-        self.play_optional_sound("ping-down.wav", override_path);
+        let _ = self.try_play_stop(override_path);
     }
 
     pub fn play_error(&self, override_path: Option<&Path>) {
+        let _ = self.try_play_error(override_path);
+    }
+
+    /// Returns true if a WAV (custom or bundled) was played successfully.
+    pub fn try_play_start(&self, override_path: Option<&Path>) -> bool {
+        self.try_play_optional_sound("ping-up.wav", override_path)
+    }
+
+    /// Returns true if a WAV (custom or bundled) was played successfully.
+    pub fn try_play_stop(&self, override_path: Option<&Path>) -> bool {
+        self.try_play_optional_sound("ping-down.wav", override_path)
+    }
+
+    /// Returns true if a WAV was played, or the Windows error beep was triggered.
+    pub fn try_play_error(&self, override_path: Option<&Path>) -> bool {
         if !self.enabled {
-            return;
+            return false;
         }
 
         if self.try_play_path(override_path).is_some() {
-            return;
+            return true;
         }
 
         #[cfg(target_os = "windows")]
-        unsafe {
-            let _ = windows_sys::Win32::System::Diagnostics::Debug::MessageBeep(
-                windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONHAND,
-            );
+        {
+            unsafe {
+                let _ = windows_sys::Win32::System::Diagnostics::Debug::MessageBeep(
+                    windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONHAND,
+                );
+            }
+            return true;
         }
+
+        #[cfg(not(target_os = "windows"))]
+        false
     }
 
-    fn play_optional_sound(&self, asset_name: &str, override_path: Option<&Path>) {
+    fn try_play_optional_sound(&self, asset_name: &str, override_path: Option<&Path>) -> bool {
         if !self.enabled {
-            return;
+            return false;
         }
 
         if self.try_play_path(override_path).is_some() {
-            return;
+            return true;
         }
 
         let asset_path = self.sounds_root.join(asset_name);
-        let _ = self.try_play_path(Some(asset_path.as_path()));
+        self.try_play_path(Some(asset_path.as_path())).is_some()
     }
 
     fn try_play_path(&self, path: Option<&Path>) -> Option<()> {
