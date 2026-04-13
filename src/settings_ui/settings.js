@@ -321,10 +321,14 @@
 
   window.__chirprReceive = function (message) {
     switch (message.kind) {
-      case "replace_sound_path":
-        $(message.field).value = message.value || "";
+      case "replace_sound_path": {
+        const field = $(message.field);
+        if (field) {
+          field.value = message.value || "";
+        }
         showBanner(structuredError, "");
         break;
+      }
       case "update_model_status":
         modelStatus.textContent = message.message || "";
         break;
