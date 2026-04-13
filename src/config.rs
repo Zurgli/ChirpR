@@ -874,6 +874,21 @@ mod tests {
     }
 
     #[test]
+    fn raw_config_accepts_mixed_case_stt_backend() {
+        let config = ChirpConfig::from_toml_str(
+            r#"
+primary_shortcut = "ctrl+shift+space"
+recording_mode = "toggle"
+stt_backend = "Parakeet"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.stt_backend, "Parakeet");
+        config.validate().unwrap();
+    }
+
+    #[test]
     fn canonical_toml_round_trips_common_settings() {
         let mut config = ChirpConfig {
             primary_shortcut: "rightctrl".into(),
